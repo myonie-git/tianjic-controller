@@ -1,0 +1,225 @@
+// =============================================================================
+// tj_ctrl_csr_pkg.sv — CSR 偏移常量 + hwi/hwo 结构体(map v0.1.0)
+// 本文件由 gen_csr.py 自动生成(真源 tj_ctrl_csr.yaml,md5=54f423f0fcf3),勿手改;
+// 指纹取代日期戳:同一真源再生成逐字节相同,防漂移 diff 可直接做门禁
+
+// 域契约:CSR 全部位于 pclk;hwi 各成员必须已同步到 pclk(引擎侧负责 CDC),
+//         hwo 中 PULSE 成员为单拍脉冲,跨域请自行做脉冲同步。
+// =============================================================================
+package tj_ctrl_csr_pkg;
+
+  // ---- GLB 控制器标识、控制与状态。 @0x0000 
+  localparam int unsigned TJ_CSR_GLB_BASE = 'h0000;
+  localparam int unsigned TJ_CSR_GLB_ID = 'h00;
+  localparam int unsigned TJ_CSR_GLB_VERSION = 'h04;
+  localparam int unsigned TJ_CSR_GLB_SCRATCH = 'h08;
+  localparam int unsigned TJ_CSR_GLB_CTRL = 'h0C;
+  localparam int unsigned TJ_CSR_GLB_STA = 'h10;
+
+  // ---- IRQ 中断汇聚 @0x0100 
+  localparam int unsigned TJ_CSR_IRQ_BASE = 'h0100;
+  localparam int unsigned TJ_CSR_IRQ_RAW = 'h00;
+  localparam int unsigned TJ_CSR_IRQ_EN = 'h04;
+  localparam int unsigned TJ_CSR_IRQ_STA = 'h08;
+  localparam int unsigned TJ_CSR_IRQ_TST = 'h0C;
+
+  // ---- SYS 芯片复位、时钟缓冲器使能与时间戳。 @0x0200 
+  localparam int unsigned TJ_CSR_SYS_BASE = 'h0200;
+  localparam int unsigned TJ_CSR_SYS_RST_LEVEL = 'h00;
+  localparam int unsigned TJ_CSR_SYS_CLK_CTL = 'h04;
+  localparam int unsigned TJ_CSR_SYS_TS_CTRL = 'h08;
+  localparam int unsigned TJ_CSR_SYS_TS_LO = 'h0C;
+  localparam int unsigned TJ_CSR_SYS_TS_HI = 'h10;
+
+  // ---- SPI SPI组控制与状态；逻辑接口为组内4个die共用SCLK/MOSI、独立CS/MISO。CLKDIV/TMO与SPIWIN、BOOT共用。 @0x0400 
+  localparam int unsigned TJ_CSR_SPI_BASE = 'h0400;
+  localparam int unsigned TJ_CSR_SPI_STRIDE = 'h80;
+  localparam int unsigned TJ_CSR_SPI_N = 8;  // 例化数(v1)
+  localparam int unsigned TJ_CSR_SPI_N_FULL = 8;  // 地址预留数
+  localparam int unsigned TJ_CSR_SPI_CMD = 'h00;
+  localparam int unsigned TJ_CSR_SPI_ADDR = 'h04;
+  localparam int unsigned TJ_CSR_SPI_WDATA = 'h08;
+  localparam int unsigned TJ_CSR_SPI_RDATA = 'h0C;
+  localparam int unsigned TJ_CSR_SPI_CLKDIV = 'h10;
+  localparam int unsigned TJ_CSR_SPI_TMO = 'h14;
+  localparam int unsigned TJ_CSR_SPI_DB = 'h18;
+  localparam int unsigned TJ_CSR_SPI_STA = 'h1C;
+  localparam int unsigned TJ_CSR_SPI_BUF = 'h40;  // 预留
+
+  // ---- BOOT 引导引擎:DDR → SPI 事务层流式通路 @0x0800 
+  localparam int unsigned TJ_CSR_BOOT_BASE = 'h0800;
+  localparam int unsigned TJ_CSR_BOOT_CMD = 'h00;
+  localparam int unsigned TJ_CSR_BOOT_SRC_LO = 'h04;
+  localparam int unsigned TJ_CSR_BOOT_SRC_HI = 'h08;
+  localparam int unsigned TJ_CSR_BOOT_LEN = 'h0C;
+  localparam int unsigned TJ_CSR_BOOT_DST = 'h10;
+  localparam int unsigned TJ_CSR_BOOT_DB = 'h14;
+  localparam int unsigned TJ_CSR_BOOT_STA = 'h18;
+
+  // ---- SEND 下行 SEND 引擎:DDR 记录表 → 解析 → 按 ch 重映射分发 → LVDS 缝 @0x0C00 
+  localparam int unsigned TJ_CSR_SEND_BASE = 'h0C00;
+  localparam int unsigned TJ_CSR_SEND_SRC_LO = 'h00;
+  localparam int unsigned TJ_CSR_SEND_SRC_HI = 'h04;
+  localparam int unsigned TJ_CSR_SEND_CNT = 'h08;
+  localparam int unsigned TJ_CSR_SEND_DB = 'h0C;
+  localparam int unsigned TJ_CSR_SEND_STA = 'h10;
+  localparam int unsigned TJ_CSR_SEND_SENT = 'h14;
+
+  // ---- RECV 上行 RECV 通道 @0x1000 
+  localparam int unsigned TJ_CSR_RECV_BASE = 'h1000;
+  localparam int unsigned TJ_CSR_RECV_STRIDE = 'h40;
+  localparam int unsigned TJ_CSR_RECV_N = 3;  // 例化数(v1)
+  localparam int unsigned TJ_CSR_RECV_N_FULL = 12;  // 地址预留数
+  localparam int unsigned TJ_CSR_RECV_RING_LO = 'h00;
+  localparam int unsigned TJ_CSR_RECV_RING_HI = 'h04;
+  localparam int unsigned TJ_CSR_RECV_SIZE = 'h08;
+  localparam int unsigned TJ_CSR_RECV_WMARK = 'h0C;
+  localparam int unsigned TJ_CSR_RECV_CTRL = 'h10;
+  localparam int unsigned TJ_CSR_RECV_STA = 'h14;
+  localparam int unsigned TJ_CSR_RECV_WPTR = 'h18;
+  localparam int unsigned TJ_CSR_RECV_RPTR = 'h1C;
+
+  // ---- LNK 链路控制 @0x2000 
+  localparam int unsigned TJ_CSR_LNK_BASE = 'h2000;
+  localparam int unsigned TJ_CSR_LNK_EN = 'h00;
+  localparam int unsigned TJ_CSR_LNK_REMAP0 = 'h04;
+  localparam int unsigned TJ_CSR_LNK_REMAP1 = 'h08;
+  localparam int unsigned TJ_CSR_LNK_FC_TMO = 'h0C;
+  localparam int unsigned TJ_CSR_LNK_CNT_SEL = 'h10;
+  localparam int unsigned TJ_CSR_LNK_CNT_VAL = 'h14;
+  localparam int unsigned TJ_CSR_LNK_STA = 'h18;
+
+  // ---- PRBS PRBS 扫频引擎 @0x2800 (预留 v2)
+  localparam int unsigned TJ_CSR_PRBS_BASE = 'h2800;
+  localparam int unsigned TJ_CSR_PRBS_CTRL = 'h00;  // 预留
+  localparam int unsigned TJ_CSR_PRBS_CYCLES = 'h04;  // 预留
+  localparam int unsigned TJ_CSR_PRBS_ERR_CNT = 'h08;  // 预留
+  localparam int unsigned TJ_CSR_PRBS_BIT_CNT = 'h0C;  // 预留
+  localparam int unsigned TJ_CSR_PRBS_STA = 'h10;  // 预留
+
+  // ---- TRACE 包 trace 环形缓存 @0x3000 
+  localparam int unsigned TJ_CSR_TRACE_BASE = 'h3000;
+  localparam int unsigned TJ_CSR_TRACE_CTRL = 'h00;
+  localparam int unsigned TJ_CSR_TRACE_STA = 'h04;
+  localparam int unsigned TJ_CSR_TRACE_ADDR = 'h08;
+  localparam int unsigned TJ_CSR_TRACE_DATA0 = 'h0C;
+  localparam int unsigned TJ_CSR_TRACE_DATA1 = 'h10;
+  localparam int unsigned TJ_CSR_TRACE_DATA2 = 'h14;
+  localparam int unsigned TJ_CSR_TRACE_DATA3 = 'h18;
+
+  // ---- CC FPGA侧lvds_subsys配置链主机，33位链协议；pclk与目标实例的配置/APB时钟须同域。 @0x3800 
+  localparam int unsigned TJ_CSR_CC_BASE = 'h3800;
+  localparam int unsigned TJ_CSR_CC_CMD = 'h00;
+  localparam int unsigned TJ_CSR_CC_WDATA = 'h04;
+  localparam int unsigned TJ_CSR_CC_RDATA = 'h08;
+  localparam int unsigned TJ_CSR_CC_DB = 'h0C;
+  localparam int unsigned TJ_CSR_CC_STA = 'h10;
+
+  // ---- SPIWIN SPI 透明转发窗口页寄存器 @0x3C00 
+  localparam int unsigned TJ_CSR_SPIWIN_BASE = 'h3C00;
+  localparam int unsigned TJ_CSR_SPIWIN_CTRL = 'h00;
+  localparam int unsigned TJ_CSR_SPIWIN_PAGE = 'h04;
+  localparam int unsigned TJ_CSR_SPIWIN_OFFS = 'h08;
+  localparam int unsigned TJ_CSR_SPIWIN_STA = 'h0C;
+
+  // ---- WIN SPI 直通窗体 @0x4000 (预留 ext)
+  localparam int unsigned TJ_CSR_WIN_BASE = 'h4000;
+  localparam int unsigned TJ_CSR_WIN_WIN = 'h00;  // 预留
+
+  typedef struct packed {  // 硬件 → CSR(pclk 同步)
+    logic [7:0] glb_sta_spi_busy;
+    logic glb_sta_boot_busy;
+    logic glb_sta_send_busy;
+    logic glb_sta_cc_busy;
+    logic [31:0] irq_raw_set;
+    logic [31:0] sys_ts_lo;
+    logic [15:0] sys_ts_hi;
+    logic [7:0][31:0] spi_rdata;
+    logic [7:0] spi_sta_busy;
+    logic [7:0] spi_sta_done_set;
+    logic [7:0] spi_sta_err_tmo_set;
+    logic boot_sta_busy;
+    logic boot_sta_done_set;
+    logic boot_sta_err_set;
+    logic [3:0] boot_sta_err_code;
+    logic send_sta_busy;
+    logic send_sta_done_set;
+    logic send_sta_err_set;
+    logic [31:0] send_sent;
+    logic [2:0] recv_sta_wmark_hit_set;
+    logic [2:0] recv_sta_endpkt_set;
+    logic [2:0] recv_sta_ovf_set;
+    logic [2:0][15:0] recv_sta_level;
+    logic [2:0][31:0] recv_wptr;
+    logic [31:0] lnk_cnt_val;
+    logic [7:0] lnk_sta;
+    logic [15:0] trace_sta_count;
+    logic trace_sta_wrapped;
+    logic [31:0] trace_data0;
+    logic [31:0] trace_data1;
+    logic [31:0] trace_data2;
+    logic [31:0] trace_data3;
+    logic [31:0] cc_rdata;
+    logic cc_sta_busy;
+    logic cc_sta_dvld_set;
+    logic spiwin_sta_busy;
+    logic spiwin_sta_err_tmo_set;
+  } tj_csr_i_t;
+
+  typedef struct packed {  // CSR → 硬件(RW=电平,PULSE=单拍,派生=组合)
+    logic [31:0] glb_scratch;
+    logic glb_ctrl_srst;  // PULSE
+    logic [31:0] irq_en;
+    logic [31:0] irq_sta;  // 派生
+    logic [31:0] sys_rst_level;
+    logic [3:0] sys_clk_ctl;
+    logic sys_ts_ctrl_en;
+    logic [1:0] sys_ts_ctrl_presc;
+    logic sys_ts_ctrl_clr;  // PULSE
+    logic [7:0][1:0] spi_cmd_kind;
+    logic [7:0][1:0] spi_cmd_die;
+    logic [7:0][31:0] spi_addr;
+    logic [7:0][31:0] spi_wdata;
+    logic [7:0][7:0] spi_clkdiv;
+    logic [7:0][31:0] spi_tmo;
+    logic [7:0] spi_db_go;  // PULSE
+    logic [1:0] boot_cmd_kind;
+    logic [4:0] boot_cmd_die;
+    logic [31:0] boot_src_lo;
+    logic [15:0] boot_src_hi;
+    logic [31:0] boot_len;
+    logic [31:0] boot_dst;
+    logic boot_db_go;  // PULSE
+    logic [31:0] send_src_lo;
+    logic [15:0] send_src_hi;
+    logic [31:0] send_cnt;
+    logic send_db_go;  // PULSE
+    logic [2:0][31:0] recv_ring_lo;
+    logic [2:0][15:0] recv_ring_hi;
+    logic [2:0][31:0] recv_size;
+    logic [2:0][31:0] recv_wmark;
+    logic [2:0] recv_ctrl_en;
+    logic [2:0] recv_ctrl_ovf_policy;
+    logic [2:0] recv_ctrl_ie_wmark;
+    logic [2:0] recv_ctrl_ie_end;
+    logic [2:0][31:0] recv_rptr;
+    logic [11:0] lnk_en;
+    logic [31:0] lnk_remap0;
+    logic [15:0] lnk_remap1;
+    logic [31:0] lnk_fc_tmo;
+    logic [3:0] lnk_cnt_sel_ch;
+    logic [3:0] lnk_cnt_sel_kind;
+    logic trace_ctrl_en;
+    logic trace_ctrl_wrap;
+    logic [3:0] trace_ctrl_src;
+    logic [15:0] trace_addr;
+    logic [1:0] cc_cmd_kind;
+    logic [1:0] cc_cmd_inst;
+    logic [31:0] cc_wdata;
+    logic cc_db_go;  // PULSE
+    logic spiwin_ctrl_en;
+    logic [4:0] spiwin_page_die;
+    logic [19:0] spiwin_offs;
+  } tj_csr_o_t;
+
+endpackage

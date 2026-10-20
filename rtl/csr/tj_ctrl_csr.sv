@@ -1,0 +1,660 @@
+// =============================================================================
+// tj_ctrl_csr.sv — APB 从机 + 寄存器组(map v0.1.0,pclk 单域,零等待)
+// 本文件由 gen_csr.py 自动生成(真源 tj_ctrl_csr.yaml,md5=54f423f0fcf3),勿手改;
+// 指纹取代日期戳:同一真源再生成逐字节相同,防漂移 diff 可直接做门禁
+
+// 行为约定:未映射/预留地址 → pslverr(读返回 0,写忽略);写 RO 忽略不报错;
+//           W1C 置位与写清同拍冲突时置位优先;PULSE 读恒 0。
+// =============================================================================
+module tj_ctrl_csr
+  import tj_ctrl_csr_pkg::*;
+(
+  input  logic              pclk,
+  input  logic              presetn,
+  input  logic              psel,
+  input  logic              penable,
+  input  logic              pwrite,
+  input  logic [15:0]       paddr,
+  input  logic [31:0]       pwdata,
+  output logic              pready,
+  output logic              pslverr,
+  output logic [31:0]       prdata,
+  input  tj_csr_i_t         hwi,
+  output tj_csr_o_t         hwo
+);
+
+  wire              wr   = psel & penable & pwrite;
+  wire [13:0]       word = paddr[15:2];
+
+  logic [31:0] q_glb_scratch;
+  logic q_glb_ctrl_srst;
+  logic [31:0] q_irq_raw;
+  logic [31:0] q_irq_en;
+  logic [31:0] q_sys_rst_level;
+  logic [3:0] q_sys_clk_ctl;
+  logic q_sys_ts_ctrl_en;
+  logic [1:0] q_sys_ts_ctrl_presc;
+  logic q_sys_ts_ctrl_clr;
+  logic [7:0][1:0] q_spi_cmd_kind;
+  logic [7:0][1:0] q_spi_cmd_die;
+  logic [7:0][31:0] q_spi_addr;
+  logic [7:0][31:0] q_spi_wdata;
+  logic [7:0][7:0] q_spi_clkdiv;
+  logic [7:0][31:0] q_spi_tmo;
+  logic [7:0] q_spi_db_go;
+  logic [7:0] q_spi_sta_done;
+  logic [7:0] q_spi_sta_err_tmo;
+  logic [1:0] q_boot_cmd_kind;
+  logic [4:0] q_boot_cmd_die;
+  logic [31:0] q_boot_src_lo;
+  logic [15:0] q_boot_src_hi;
+  logic [31:0] q_boot_len;
+  logic [31:0] q_boot_dst;
+  logic q_boot_db_go;
+  logic q_boot_sta_done;
+  logic q_boot_sta_err;
+  logic [31:0] q_send_src_lo;
+  logic [15:0] q_send_src_hi;
+  logic [31:0] q_send_cnt;
+  logic q_send_db_go;
+  logic q_send_sta_done;
+  logic q_send_sta_err;
+  logic [2:0][31:0] q_recv_ring_lo;
+  logic [2:0][15:0] q_recv_ring_hi;
+  logic [2:0][31:0] q_recv_size;
+  logic [2:0][31:0] q_recv_wmark;
+  logic [2:0] q_recv_ctrl_en;
+  logic [2:0] q_recv_ctrl_ovf_policy;
+  logic [2:0] q_recv_ctrl_ie_wmark;
+  logic [2:0] q_recv_ctrl_ie_end;
+  logic [2:0] q_recv_sta_wmark_hit;
+  logic [2:0] q_recv_sta_endpkt;
+  logic [2:0] q_recv_sta_ovf;
+  logic [2:0][31:0] q_recv_rptr;
+  logic [11:0] q_lnk_en;
+  logic [31:0] q_lnk_remap0;
+  logic [15:0] q_lnk_remap1;
+  logic [31:0] q_lnk_fc_tmo;
+  logic [3:0] q_lnk_cnt_sel_ch;
+  logic [3:0] q_lnk_cnt_sel_kind;
+  logic q_trace_ctrl_en;
+  logic q_trace_ctrl_wrap;
+  logic [3:0] q_trace_ctrl_src;
+  logic [15:0] q_trace_addr;
+  logic [1:0] q_cc_cmd_kind;
+  logic [1:0] q_cc_cmd_inst;
+  logic [31:0] q_cc_wdata;
+  logic q_cc_db_go;
+  logic q_cc_sta_dvld;
+  logic q_spiwin_ctrl_en;
+  logic [4:0] q_spiwin_page_die;
+  logic [19:0] q_spiwin_offs;
+  logic q_spiwin_sta_err_tmo;
+
+  // ---- GLB @0x0000
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_glb_scratch <= 32'h0;
+      q_glb_ctrl_srst <= 1'h0;
+    end else begin
+      if (wr && (word == 2)) q_glb_scratch <= pwdata[31:0];
+      q_glb_ctrl_srst <= (wr && (word == 3)) ? pwdata[0] : 1'b0;
+    end
+  end
+
+  // ---- IRQ @0x0100
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_irq_raw <= 32'h0;
+      q_irq_en <= 32'h0;
+    end else begin
+      q_irq_raw <= (q_irq_raw & ~((wr && (word == 64)) ? pwdata[31:0] : '0)) | hwi.irq_raw_set | ((wr && (word == 67)) ? pwdata[31:0] : '0);
+      if (wr && (word == 65)) q_irq_en <= pwdata[31:0];
+    end
+  end
+
+  // ---- SYS @0x0200
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_sys_rst_level <= 32'h0;
+      q_sys_clk_ctl <= 4'h0;
+      q_sys_ts_ctrl_en <= 1'h0;
+      q_sys_ts_ctrl_presc <= 2'h0;
+      q_sys_ts_ctrl_clr <= 1'h0;
+    end else begin
+      if (wr && (word == 128)) q_sys_rst_level <= pwdata[31:0];
+      if (wr && (word == 129)) q_sys_clk_ctl <= pwdata[3:0];
+      if (wr && (word == 130)) q_sys_ts_ctrl_en <= pwdata[0];
+      if (wr && (word == 130)) q_sys_ts_ctrl_presc <= pwdata[2:1];
+      q_sys_ts_ctrl_clr <= (wr && (word == 130)) ? pwdata[8:8] : 1'b0;
+    end
+  end
+
+  // ---- SPI @0x0400
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_spi_cmd_kind <= {8{2'h0}};
+      q_spi_cmd_die <= {8{2'h0}};
+      q_spi_addr <= {8{32'h0}};
+      q_spi_wdata <= {8{32'h0}};
+      q_spi_clkdiv <= {8{8'h4}};
+      q_spi_tmo <= {8{32'hF4240}};
+      q_spi_db_go <= {8{1'h0}};
+      q_spi_sta_done <= {8{1'h0}};
+      q_spi_sta_err_tmo <= {8{1'h0}};
+    end else begin
+      for (int k = 0; k < 8; k++) begin
+        if (wr && (word == 256 + k*32)) q_spi_cmd_kind[k] <= pwdata[1:0];
+        if (wr && (word == 256 + k*32)) q_spi_cmd_die[k] <= pwdata[5:4];
+        if (wr && (word == 257 + k*32)) q_spi_addr[k] <= pwdata[31:0];
+        if (wr && (word == 258 + k*32)) q_spi_wdata[k] <= pwdata[31:0];
+        if (wr && (word == 260 + k*32)) q_spi_clkdiv[k] <= pwdata[7:0];
+        if (wr && (word == 261 + k*32)) q_spi_tmo[k] <= pwdata[31:0];
+        q_spi_db_go[k] <= (wr && (word == 262 + k*32)) ? pwdata[0] : 1'b0;
+        q_spi_sta_done[k] <= (q_spi_sta_done[k] & ~((wr && (word == 263 + k*32)) ? pwdata[8:8] : '0)) | hwi.spi_sta_done_set[k];
+        q_spi_sta_err_tmo[k] <= (q_spi_sta_err_tmo[k] & ~((wr && (word == 263 + k*32)) ? pwdata[9:9] : '0)) | hwi.spi_sta_err_tmo_set[k];
+      end
+    end
+  end
+
+  // ---- BOOT @0x0800
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_boot_cmd_kind <= 2'h0;
+      q_boot_cmd_die <= 5'h0;
+      q_boot_src_lo <= 32'h0;
+      q_boot_src_hi <= 16'h0;
+      q_boot_len <= 32'h0;
+      q_boot_dst <= 32'h0;
+      q_boot_db_go <= 1'h0;
+      q_boot_sta_done <= 1'h0;
+      q_boot_sta_err <= 1'h0;
+    end else begin
+      if (wr && (word == 512)) q_boot_cmd_kind <= pwdata[1:0];
+      if (wr && (word == 512)) q_boot_cmd_die <= pwdata[8:4];
+      if (wr && (word == 513)) q_boot_src_lo <= pwdata[31:0];
+      if (wr && (word == 514)) q_boot_src_hi <= pwdata[15:0];
+      if (wr && (word == 515)) q_boot_len <= pwdata[31:0];
+      if (wr && (word == 516)) q_boot_dst <= pwdata[31:0];
+      q_boot_db_go <= (wr && (word == 517)) ? pwdata[0] : 1'b0;
+      q_boot_sta_done <= (q_boot_sta_done & ~((wr && (word == 518)) ? pwdata[8:8] : '0)) | hwi.boot_sta_done_set;
+      q_boot_sta_err <= (q_boot_sta_err & ~((wr && (word == 518)) ? pwdata[9:9] : '0)) | hwi.boot_sta_err_set;
+    end
+  end
+
+  // ---- SEND @0x0C00
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_send_src_lo <= 32'h0;
+      q_send_src_hi <= 16'h0;
+      q_send_cnt <= 32'h0;
+      q_send_db_go <= 1'h0;
+      q_send_sta_done <= 1'h0;
+      q_send_sta_err <= 1'h0;
+    end else begin
+      if (wr && (word == 768)) q_send_src_lo <= pwdata[31:0];
+      if (wr && (word == 769)) q_send_src_hi <= pwdata[15:0];
+      if (wr && (word == 770)) q_send_cnt <= pwdata[31:0];
+      q_send_db_go <= (wr && (word == 771)) ? pwdata[0] : 1'b0;
+      q_send_sta_done <= (q_send_sta_done & ~((wr && (word == 772)) ? pwdata[8:8] : '0)) | hwi.send_sta_done_set;
+      q_send_sta_err <= (q_send_sta_err & ~((wr && (word == 772)) ? pwdata[9:9] : '0)) | hwi.send_sta_err_set;
+    end
+  end
+
+  // ---- RECV @0x1000
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_recv_ring_lo <= {3{32'h0}};
+      q_recv_ring_hi <= {3{16'h0}};
+      q_recv_size <= {3{32'h0}};
+      q_recv_wmark <= {3{32'h0}};
+      q_recv_ctrl_en <= {3{1'h0}};
+      q_recv_ctrl_ovf_policy <= {3{1'h0}};
+      q_recv_ctrl_ie_wmark <= {3{1'h0}};
+      q_recv_ctrl_ie_end <= {3{1'h0}};
+      q_recv_sta_wmark_hit <= {3{1'h0}};
+      q_recv_sta_endpkt <= {3{1'h0}};
+      q_recv_sta_ovf <= {3{1'h0}};
+      q_recv_rptr <= {3{32'h0}};
+    end else begin
+      for (int k = 0; k < 3; k++) begin
+        if (wr && (word == 1024 + k*16)) q_recv_ring_lo[k] <= pwdata[31:0];
+        if (wr && (word == 1025 + k*16)) q_recv_ring_hi[k] <= pwdata[15:0];
+        if (wr && (word == 1026 + k*16)) q_recv_size[k] <= pwdata[31:0];
+        if (wr && (word == 1027 + k*16)) q_recv_wmark[k] <= pwdata[31:0];
+        if (wr && (word == 1028 + k*16)) q_recv_ctrl_en[k] <= pwdata[0];
+        if (wr && (word == 1028 + k*16)) q_recv_ctrl_ovf_policy[k] <= pwdata[1:1];
+        if (wr && (word == 1028 + k*16)) q_recv_ctrl_ie_wmark[k] <= pwdata[8:8];
+        if (wr && (word == 1028 + k*16)) q_recv_ctrl_ie_end[k] <= pwdata[9:9];
+        q_recv_sta_wmark_hit[k] <= (q_recv_sta_wmark_hit[k] & ~((wr && (word == 1029 + k*16)) ? pwdata[0] : '0)) | hwi.recv_sta_wmark_hit_set[k];
+        q_recv_sta_endpkt[k] <= (q_recv_sta_endpkt[k] & ~((wr && (word == 1029 + k*16)) ? pwdata[1:1] : '0)) | hwi.recv_sta_endpkt_set[k];
+        q_recv_sta_ovf[k] <= (q_recv_sta_ovf[k] & ~((wr && (word == 1029 + k*16)) ? pwdata[2:2] : '0)) | hwi.recv_sta_ovf_set[k];
+        if (wr && (word == 1031 + k*16)) q_recv_rptr[k] <= pwdata[31:0];
+      end
+    end
+  end
+
+  // ---- LNK @0x2000
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_lnk_en <= 12'h0;
+      q_lnk_remap0 <= 32'h76543210;
+      q_lnk_remap1 <= 16'hBA98;
+      q_lnk_fc_tmo <= 32'hF4240;
+      q_lnk_cnt_sel_ch <= 4'h0;
+      q_lnk_cnt_sel_kind <= 4'h0;
+    end else begin
+      if (wr && (word == 2048)) q_lnk_en <= pwdata[11:0];
+      if (wr && (word == 2049)) q_lnk_remap0 <= pwdata[31:0];
+      if (wr && (word == 2050)) q_lnk_remap1 <= pwdata[15:0];
+      if (wr && (word == 2051)) q_lnk_fc_tmo <= pwdata[31:0];
+      if (wr && (word == 2052)) q_lnk_cnt_sel_ch <= pwdata[3:0];
+      if (wr && (word == 2052)) q_lnk_cnt_sel_kind <= pwdata[11:8];
+    end
+  end
+
+  // ---- TRACE @0x3000
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_trace_ctrl_en <= 1'h0;
+      q_trace_ctrl_wrap <= 1'h0;
+      q_trace_ctrl_src <= 4'h0;
+      q_trace_addr <= 16'h0;
+    end else begin
+      if (wr && (word == 3072)) q_trace_ctrl_en <= pwdata[0];
+      if (wr && (word == 3072)) q_trace_ctrl_wrap <= pwdata[1:1];
+      if (wr && (word == 3072)) q_trace_ctrl_src <= pwdata[11:8];
+      if (wr && (word == 3074)) q_trace_addr <= pwdata[15:0];
+    end
+  end
+
+  // ---- CC @0x3800
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_cc_cmd_kind <= 2'h0;
+      q_cc_cmd_inst <= 2'h0;
+      q_cc_wdata <= 32'h0;
+      q_cc_db_go <= 1'h0;
+      q_cc_sta_dvld <= 1'h0;
+    end else begin
+      if (wr && (word == 3584)) q_cc_cmd_kind <= pwdata[1:0];
+      if (wr && (word == 3584)) q_cc_cmd_inst <= pwdata[5:4];
+      if (wr && (word == 3585)) q_cc_wdata <= pwdata[31:0];
+      q_cc_db_go <= (wr && (word == 3587)) ? pwdata[0] : 1'b0;
+      q_cc_sta_dvld <= (q_cc_sta_dvld & ~((wr && (word == 3588)) ? pwdata[8:8] : '0)) | hwi.cc_sta_dvld_set;
+    end
+  end
+
+  // ---- SPIWIN @0x3C00
+  always_ff @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      q_spiwin_ctrl_en <= 1'h0;
+      q_spiwin_page_die <= 5'h0;
+      q_spiwin_offs <= 20'h0;
+      q_spiwin_sta_err_tmo <= 1'h0;
+    end else begin
+      if (wr && (word == 3840)) q_spiwin_ctrl_en <= pwdata[0];
+      if (wr && (word == 3841)) q_spiwin_page_die <= pwdata[4:0];
+      if (wr && (word == 3842)) q_spiwin_offs <= pwdata[19:0];
+      q_spiwin_sta_err_tmo <= (q_spiwin_sta_err_tmo & ~((wr && (word == 3843)) ? pwdata[8:8] : '0)) | hwi.spiwin_sta_err_tmo_set;
+    end
+  end
+
+  // ---- 读多路(或树)与地址命中
+  logic [31:0] rmux;
+  logic        rhit;
+  always_comb begin
+    rmux = '0;
+    rhit = 1'b0;
+    if (word == 0) begin  // GLB.ID @0x0000
+      rhit = 1'b1;
+      rmux[31:0] |= 32'h544A4331;
+    end
+    if (word == 1) begin  // GLB.VERSION @0x0004
+      rhit = 1'b1;
+      rmux[31:0] |= 32'h100;
+    end
+    if (word == 2) begin  // GLB.SCRATCH @0x0008
+      rhit = 1'b1;
+      rmux[31:0] |= q_glb_scratch;
+    end
+    if (word == 3) begin  // GLB.CTRL @0x000C
+      rhit = 1'b1;
+    end
+    if (word == 4) begin  // GLB.STA @0x0010
+      rhit = 1'b1;
+      rmux[7:0] |= hwi.glb_sta_spi_busy;
+      rmux[8] |= hwi.glb_sta_boot_busy;
+      rmux[9] |= hwi.glb_sta_send_busy;
+      rmux[10] |= hwi.glb_sta_cc_busy;
+    end
+    if (word == 64) begin  // IRQ.RAW @0x0100
+      rhit = 1'b1;
+      rmux[31:0] |= q_irq_raw;
+    end
+    if (word == 65) begin  // IRQ.EN @0x0104
+      rhit = 1'b1;
+      rmux[31:0] |= q_irq_en;
+    end
+    if (word == 66) begin  // IRQ.STA @0x0108
+      rhit = 1'b1;
+      rmux |= (q_irq_raw & q_irq_en);
+    end
+    if (word == 67) begin  // IRQ.TST @0x010C
+      rhit = 1'b1;
+    end
+    if (word == 128) begin  // SYS.RST_LEVEL @0x0200
+      rhit = 1'b1;
+      rmux[31:0] |= q_sys_rst_level;
+    end
+    if (word == 129) begin  // SYS.CLK_CTL @0x0204
+      rhit = 1'b1;
+      rmux[3:0] |= q_sys_clk_ctl;
+    end
+    if (word == 130) begin  // SYS.TS_CTRL @0x0208
+      rhit = 1'b1;
+      rmux[0] |= q_sys_ts_ctrl_en;
+      rmux[2:1] |= q_sys_ts_ctrl_presc;
+    end
+    if (word == 131) begin  // SYS.TS_LO @0x020C
+      rhit = 1'b1;
+      rmux[31:0] |= hwi.sys_ts_lo;
+    end
+    if (word == 132) begin  // SYS.TS_HI @0x0210
+      rhit = 1'b1;
+      rmux[15:0] |= hwi.sys_ts_hi;
+    end
+    for (int k = 0; k < 8; k++) begin
+      if (word == 256 + k*32) begin  // SPI.CMD @0x0400+k*0x80
+        rhit = 1'b1;
+        rmux[1:0] |= q_spi_cmd_kind[k];
+        rmux[5:4] |= q_spi_cmd_die[k];
+      end
+      if (word == 257 + k*32) begin  // SPI.ADDR @0x0404+k*0x80
+        rhit = 1'b1;
+        rmux[31:0] |= q_spi_addr[k];
+      end
+      if (word == 258 + k*32) begin  // SPI.WDATA @0x0408+k*0x80
+        rhit = 1'b1;
+        rmux[31:0] |= q_spi_wdata[k];
+      end
+      if (word == 259 + k*32) begin  // SPI.RDATA @0x040C+k*0x80
+        rhit = 1'b1;
+        rmux[31:0] |= hwi.spi_rdata[k];
+      end
+      if (word == 260 + k*32) begin  // SPI.CLKDIV @0x0410+k*0x80
+        rhit = 1'b1;
+        rmux[7:0] |= q_spi_clkdiv[k];
+      end
+      if (word == 261 + k*32) begin  // SPI.TMO @0x0414+k*0x80
+        rhit = 1'b1;
+        rmux[31:0] |= q_spi_tmo[k];
+      end
+      if (word == 262 + k*32) begin  // SPI.DB @0x0418+k*0x80
+        rhit = 1'b1;
+      end
+      if (word == 263 + k*32) begin  // SPI.STA @0x041C+k*0x80
+        rhit = 1'b1;
+        rmux[0] |= hwi.spi_sta_busy[k];
+        rmux[8] |= q_spi_sta_done[k];
+        rmux[9] |= q_spi_sta_err_tmo[k];
+      end
+    end
+    if (word == 512) begin  // BOOT.CMD @0x0800
+      rhit = 1'b1;
+      rmux[1:0] |= q_boot_cmd_kind;
+      rmux[8:4] |= q_boot_cmd_die;
+    end
+    if (word == 513) begin  // BOOT.SRC_LO @0x0804
+      rhit = 1'b1;
+      rmux[31:0] |= q_boot_src_lo;
+    end
+    if (word == 514) begin  // BOOT.SRC_HI @0x0808
+      rhit = 1'b1;
+      rmux[15:0] |= q_boot_src_hi;
+    end
+    if (word == 515) begin  // BOOT.LEN @0x080C
+      rhit = 1'b1;
+      rmux[31:0] |= q_boot_len;
+    end
+    if (word == 516) begin  // BOOT.DST @0x0810
+      rhit = 1'b1;
+      rmux[31:0] |= q_boot_dst;
+    end
+    if (word == 517) begin  // BOOT.DB @0x0814
+      rhit = 1'b1;
+    end
+    if (word == 518) begin  // BOOT.STA @0x0818
+      rhit = 1'b1;
+      rmux[0] |= hwi.boot_sta_busy;
+      rmux[8] |= q_boot_sta_done;
+      rmux[9] |= q_boot_sta_err;
+      rmux[15:12] |= hwi.boot_sta_err_code;
+    end
+    if (word == 768) begin  // SEND.SRC_LO @0x0C00
+      rhit = 1'b1;
+      rmux[31:0] |= q_send_src_lo;
+    end
+    if (word == 769) begin  // SEND.SRC_HI @0x0C04
+      rhit = 1'b1;
+      rmux[15:0] |= q_send_src_hi;
+    end
+    if (word == 770) begin  // SEND.CNT @0x0C08
+      rhit = 1'b1;
+      rmux[31:0] |= q_send_cnt;
+    end
+    if (word == 771) begin  // SEND.DB @0x0C0C
+      rhit = 1'b1;
+    end
+    if (word == 772) begin  // SEND.STA @0x0C10
+      rhit = 1'b1;
+      rmux[0] |= hwi.send_sta_busy;
+      rmux[8] |= q_send_sta_done;
+      rmux[9] |= q_send_sta_err;
+    end
+    if (word == 773) begin  // SEND.SENT @0x0C14
+      rhit = 1'b1;
+      rmux[31:0] |= hwi.send_sent;
+    end
+    for (int k = 0; k < 3; k++) begin
+      if (word == 1024 + k*16) begin  // RECV.RING_LO @0x1000+k*0x40
+        rhit = 1'b1;
+        rmux[31:0] |= q_recv_ring_lo[k];
+      end
+      if (word == 1025 + k*16) begin  // RECV.RING_HI @0x1004+k*0x40
+        rhit = 1'b1;
+        rmux[15:0] |= q_recv_ring_hi[k];
+      end
+      if (word == 1026 + k*16) begin  // RECV.SIZE @0x1008+k*0x40
+        rhit = 1'b1;
+        rmux[31:0] |= q_recv_size[k];
+      end
+      if (word == 1027 + k*16) begin  // RECV.WMARK @0x100C+k*0x40
+        rhit = 1'b1;
+        rmux[31:0] |= q_recv_wmark[k];
+      end
+      if (word == 1028 + k*16) begin  // RECV.CTRL @0x1010+k*0x40
+        rhit = 1'b1;
+        rmux[0] |= q_recv_ctrl_en[k];
+        rmux[1] |= q_recv_ctrl_ovf_policy[k];
+        rmux[8] |= q_recv_ctrl_ie_wmark[k];
+        rmux[9] |= q_recv_ctrl_ie_end[k];
+      end
+      if (word == 1029 + k*16) begin  // RECV.STA @0x1014+k*0x40
+        rhit = 1'b1;
+        rmux[0] |= q_recv_sta_wmark_hit[k];
+        rmux[1] |= q_recv_sta_endpkt[k];
+        rmux[2] |= q_recv_sta_ovf[k];
+        rmux[31:16] |= hwi.recv_sta_level[k];
+      end
+      if (word == 1030 + k*16) begin  // RECV.WPTR @0x1018+k*0x40
+        rhit = 1'b1;
+        rmux[31:0] |= hwi.recv_wptr[k];
+      end
+      if (word == 1031 + k*16) begin  // RECV.RPTR @0x101C+k*0x40
+        rhit = 1'b1;
+        rmux[31:0] |= q_recv_rptr[k];
+      end
+    end
+    if (word == 2048) begin  // LNK.EN @0x2000
+      rhit = 1'b1;
+      rmux[11:0] |= q_lnk_en;
+    end
+    if (word == 2049) begin  // LNK.REMAP0 @0x2004
+      rhit = 1'b1;
+      rmux[31:0] |= q_lnk_remap0;
+    end
+    if (word == 2050) begin  // LNK.REMAP1 @0x2008
+      rhit = 1'b1;
+      rmux[15:0] |= q_lnk_remap1;
+    end
+    if (word == 2051) begin  // LNK.FC_TMO @0x200C
+      rhit = 1'b1;
+      rmux[31:0] |= q_lnk_fc_tmo;
+    end
+    if (word == 2052) begin  // LNK.CNT_SEL @0x2010
+      rhit = 1'b1;
+      rmux[3:0] |= q_lnk_cnt_sel_ch;
+      rmux[11:8] |= q_lnk_cnt_sel_kind;
+    end
+    if (word == 2053) begin  // LNK.CNT_VAL @0x2014
+      rhit = 1'b1;
+      rmux[31:0] |= hwi.lnk_cnt_val;
+    end
+    if (word == 2054) begin  // LNK.STA @0x2018
+      rhit = 1'b1;
+      rmux[7:0] |= hwi.lnk_sta;
+    end
+    if (word == 3072) begin  // TRACE.CTRL @0x3000
+      rhit = 1'b1;
+      rmux[0] |= q_trace_ctrl_en;
+      rmux[1] |= q_trace_ctrl_wrap;
+      rmux[11:8] |= q_trace_ctrl_src;
+    end
+    if (word == 3073) begin  // TRACE.STA @0x3004
+      rhit = 1'b1;
+      rmux[15:0] |= hwi.trace_sta_count;
+      rmux[16] |= hwi.trace_sta_wrapped;
+    end
+    if (word == 3074) begin  // TRACE.ADDR @0x3008
+      rhit = 1'b1;
+      rmux[15:0] |= q_trace_addr;
+    end
+    if (word == 3075) begin  // TRACE.DATA0 @0x300C
+      rhit = 1'b1;
+      rmux[31:0] |= hwi.trace_data0;
+    end
+    if (word == 3076) begin  // TRACE.DATA1 @0x3010
+      rhit = 1'b1;
+      rmux[31:0] |= hwi.trace_data1;
+    end
+    if (word == 3077) begin  // TRACE.DATA2 @0x3014
+      rhit = 1'b1;
+      rmux[31:0] |= hwi.trace_data2;
+    end
+    if (word == 3078) begin  // TRACE.DATA3 @0x3018
+      rhit = 1'b1;
+      rmux[31:0] |= hwi.trace_data3;
+    end
+    if (word == 3584) begin  // CC.CMD @0x3800
+      rhit = 1'b1;
+      rmux[1:0] |= q_cc_cmd_kind;
+      rmux[5:4] |= q_cc_cmd_inst;
+    end
+    if (word == 3585) begin  // CC.WDATA @0x3804
+      rhit = 1'b1;
+      rmux[31:0] |= q_cc_wdata;
+    end
+    if (word == 3586) begin  // CC.RDATA @0x3808
+      rhit = 1'b1;
+      rmux[31:0] |= hwi.cc_rdata;
+    end
+    if (word == 3587) begin  // CC.DB @0x380C
+      rhit = 1'b1;
+    end
+    if (word == 3588) begin  // CC.STA @0x3810
+      rhit = 1'b1;
+      rmux[0] |= hwi.cc_sta_busy;
+      rmux[8] |= q_cc_sta_dvld;
+    end
+    if (word == 3840) begin  // SPIWIN.CTRL @0x3C00
+      rhit = 1'b1;
+      rmux[0] |= q_spiwin_ctrl_en;
+    end
+    if (word == 3841) begin  // SPIWIN.PAGE @0x3C04
+      rhit = 1'b1;
+      rmux[4:0] |= q_spiwin_page_die;
+    end
+    if (word == 3842) begin  // SPIWIN.OFFS @0x3C08
+      rhit = 1'b1;
+      rmux[19:0] |= q_spiwin_offs;
+    end
+    if (word == 3843) begin  // SPIWIN.STA @0x3C0C
+      rhit = 1'b1;
+      rmux[0] |= hwi.spiwin_sta_busy;
+      rmux[8] |= q_spiwin_sta_err_tmo;
+    end
+  end
+
+  assign prdata  = rmux;
+  assign pready  = 1'b1;
+  assign pslverr = psel & penable & ~rhit;
+
+  // ---- hwo 汇总(全成员显式赋值,无锁存)
+  always_comb begin
+    hwo.glb_scratch = q_glb_scratch;
+    hwo.glb_ctrl_srst = q_glb_ctrl_srst;
+    hwo.irq_en = q_irq_en;
+    hwo.irq_sta = q_irq_raw & q_irq_en;
+    hwo.sys_rst_level = q_sys_rst_level;
+    hwo.sys_clk_ctl = q_sys_clk_ctl;
+    hwo.sys_ts_ctrl_en = q_sys_ts_ctrl_en;
+    hwo.sys_ts_ctrl_presc = q_sys_ts_ctrl_presc;
+    hwo.sys_ts_ctrl_clr = q_sys_ts_ctrl_clr;
+    hwo.spi_cmd_kind = q_spi_cmd_kind;
+    hwo.spi_cmd_die = q_spi_cmd_die;
+    hwo.spi_addr = q_spi_addr;
+    hwo.spi_wdata = q_spi_wdata;
+    hwo.spi_clkdiv = q_spi_clkdiv;
+    hwo.spi_tmo = q_spi_tmo;
+    hwo.spi_db_go = q_spi_db_go;
+    hwo.boot_cmd_kind = q_boot_cmd_kind;
+    hwo.boot_cmd_die = q_boot_cmd_die;
+    hwo.boot_src_lo = q_boot_src_lo;
+    hwo.boot_src_hi = q_boot_src_hi;
+    hwo.boot_len = q_boot_len;
+    hwo.boot_dst = q_boot_dst;
+    hwo.boot_db_go = q_boot_db_go;
+    hwo.send_src_lo = q_send_src_lo;
+    hwo.send_src_hi = q_send_src_hi;
+    hwo.send_cnt = q_send_cnt;
+    hwo.send_db_go = q_send_db_go;
+    hwo.recv_ring_lo = q_recv_ring_lo;
+    hwo.recv_ring_hi = q_recv_ring_hi;
+    hwo.recv_size = q_recv_size;
+    hwo.recv_wmark = q_recv_wmark;
+    hwo.recv_ctrl_en = q_recv_ctrl_en;
+    hwo.recv_ctrl_ovf_policy = q_recv_ctrl_ovf_policy;
+    hwo.recv_ctrl_ie_wmark = q_recv_ctrl_ie_wmark;
+    hwo.recv_ctrl_ie_end = q_recv_ctrl_ie_end;
+    hwo.recv_rptr = q_recv_rptr;
+    hwo.lnk_en = q_lnk_en;
+    hwo.lnk_remap0 = q_lnk_remap0;
+    hwo.lnk_remap1 = q_lnk_remap1;
+    hwo.lnk_fc_tmo = q_lnk_fc_tmo;
+    hwo.lnk_cnt_sel_ch = q_lnk_cnt_sel_ch;
+    hwo.lnk_cnt_sel_kind = q_lnk_cnt_sel_kind;
+    hwo.trace_ctrl_en = q_trace_ctrl_en;
+    hwo.trace_ctrl_wrap = q_trace_ctrl_wrap;
+    hwo.trace_ctrl_src = q_trace_ctrl_src;
+    hwo.trace_addr = q_trace_addr;
+    hwo.cc_cmd_kind = q_cc_cmd_kind;
+    hwo.cc_cmd_inst = q_cc_cmd_inst;
+    hwo.cc_wdata = q_cc_wdata;
+    hwo.cc_db_go = q_cc_db_go;
+    hwo.spiwin_ctrl_en = q_spiwin_ctrl_en;
+    hwo.spiwin_page_die = q_spiwin_page_die;
+    hwo.spiwin_offs = q_spiwin_offs;
+  end
+
+endmodule
