@@ -38,7 +38,8 @@ module tj_spi_doorbell (
   logic is_rd_q, need_w_q;
 
   assign rdat_ready = 1'b1;
-  assign busy_o     = (st_q != D_IDLE);
+  // Keep BUSY set until the CSR latches the terminal event.
+  assign busy_o     = (st_q != D_IDLE) || done_set_o || err_set_o;
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -59,7 +60,7 @@ module tj_spi_doorbell (
       done_set_o <= 1'b0;
       err_set_o  <= 1'b0;
       unique case (st_q)
-        D_IDLE: if (db_go) begin
+        D_IDLE: if (db_go && !busy_o) begin
           if (csr_kind[1]) begin
             // Reserved kinds complete without issuing a transaction.
             done_set_o <= 1'b1;
