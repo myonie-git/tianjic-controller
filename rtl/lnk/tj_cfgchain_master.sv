@@ -34,7 +34,7 @@ module tj_cfgchain_master #(
   logic        rd_q;
   logic [15:0] wdog_q;
 
-  // Allow the CSR to latch read results before BUSY clears.
+  // Hold write beats for the receiver and allow the CSR to latch read results.
   assign busy_o = (st_q != C_IDLE);
 
   always_ff @(posedge clk or negedge rst_n) begin
@@ -62,7 +62,7 @@ module tj_cfgchain_master #(
           wdog_q  <= '0;
           st_q    <= C_BEAT;
         end
-        C_BEAT: st_q <= rd_q ? C_WAIT : C_IDLE;
+        C_BEAT: st_q <= rd_q ? C_WAIT : C_DONE;
         C_WAIT: begin
           wdog_q <= wdog_q + 16'd1;
           if (dout_vld) begin

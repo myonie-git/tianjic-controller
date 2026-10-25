@@ -711,7 +711,7 @@ blocks:
           - name: BUSY
             bits: 0
             kind: RO
-            desc: "链操作进行中；写拍发送完即清零，读操作等待返回或超时结束。"
+            desc: "链操作进行中；写拍发送后保留一拍保持时间，再清BUSY；读操作等待返回或超时结束。"
 
           - name: DVLD
             bits: 8

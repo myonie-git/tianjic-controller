@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build and run LVDS link tests.
+# Build and run LVDS packet and configuration-chain tests.
 # Usage: sh run_lnk_tb.sh [build_dir [seed ...]]
 set -eu
 
@@ -58,10 +58,14 @@ vlogan -full64 -sverilog -timescale=1ps/1fs +error+5000 \
   +define+FOR_SIM_ONLY +define+RTL \
   "$lnk_ctrl/rtl/pkg/tj_ctrl_pkg.sv" \
   "$lnk_ctrl/rtl/pkg/tj_ctrl_if.sv" \
+  "$lnk_ctrl/rtl/csr/tj_ctrl_csr_pkg.sv" \
+  "$lnk_ctrl/rtl/csr/tj_ctrl_csr.sv" \
   "$lnk_ctrl/rtl/lnk/tj_cfgchain_master.sv" \
   "$lnk_ctrl/rtl/lnk/tj_lnk_plugs.sv" \
-  "$lnk_here/tb_tj_lnk.sv" > vlogan_tb.log 2>&1
+  "$lnk_here/tb_tj_lnk.sv" \
+  "$lnk_here/tb_tj_cfgchain.sv" > vlogan_tb.log 2>&1
 vcs -full64 -top tb_tj_lnk -o simv_lnk > vcs_lnk.log 2>&1
+vcs -full64 -top tb_tj_cfgchain -o simv_cfgchain > vcs_cfgchain.log 2>&1
 
 for lnk_mode in 211f 210f; do
   for lnk_seed in "$@"; do
@@ -74,3 +78,5 @@ for lnk_mode in 211f 210f; do
     fi
   done
 done
+run_checked cfgchain_100mhz.log CFGCHAIN ./simv_cfgchain -nc +TJ_PCLK_HP=5.0
+run_checked cfgchain_250mhz.log CFGCHAIN ./simv_cfgchain -nc +TJ_PCLK_HP=2.0

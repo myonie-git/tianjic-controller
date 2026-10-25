@@ -102,6 +102,17 @@ module tb_tj_lnk;
     while (busy) @(posedge clk_a);
   endtask
 
+  // Send on the first idle cycle, without an added settling delay.
+  task automatic cc_op_when_idle(input [1:0] k, input [1:0] i, input [31:0] w);
+    @(negedge clk_a);
+    while (busy) @(negedge clk_a);
+    kind = k;
+    inst = i;
+    wdata = w;
+    db_go = 1'b1;
+    @(negedge clk_a);
+    db_go = 1'b0;
+  endtask
 
   task automatic cc_write(input [1:0] i, input [24:0] a, input [31:0] d);
     cc_op(2'd0, i, {7'h0, a});
@@ -176,7 +187,7 @@ module tb_tj_lnk;
     #1us rstn = 1;
     #2us;
 
-    // T1: Instance selection and register readback.
+    // T1: Instance selection, register readback and idle-paced writes.
     chk(a_idn === 2'd1 && b_idn === 2'd2, "Chained instance IDs");
     cc_write(2'd0, 25'h64, 32'h0000_1234);
     cc_read (2'd0, 25'h64, rd32);
@@ -186,6 +197,19 @@ module tb_tj_lnk;
     chk(rd32[15:0] === 16'h2345, $sformatf("Instance 1 readback: %h", rd32));
     cc_read (2'd0, 25'h64, rd32);
     chk(rd32[15:0] === 16'h1234, "Instance 0 remains unchanged");
+
+    for (int i = 0; i < 2; i++) begin
+      logic [15:0] expected;
+      expected = (i == 0) ? 16'h3456 : 16'h4567;
+      saw_dvld = 0;
+      cc_op_when_idle(2'd0, 2'(i), 32'h64);
+      cc_op_when_idle(2'd1, 2'(i), {16'h0, expected});
+      while (busy) @(negedge clk_a);
+      chk(!saw_dvld, $sformatf("inst%0d write must not set DVLD", i));
+      cc_read(2'(i), 25'h64, rd32);
+      chk(rd32[15:0] === expected,
+          $sformatf("inst%0d idle-paced write: got %h, expected %h", i, rd32, expected));
+    end
 
     // T2: Configure three physical links and enable packet traffic.
     for (int i = 0; i < 2; i++) begin
