@@ -1,0 +1,273 @@
+// File        : tb_tj_lnk.sv
+// Module      : tb_tj_lnk
+// Description : Verify configuration access and bidirectional LVDS packet traffic.
+//               Uses two chip LVDS instances, four logical ports and random backpressure.
+// Compile chip RTL with FOR_SIM_ONLY and a 1 ps / 1 fs timescale.
+
+module tb_tj_lnk;
+  import tj_ctrl_pkg::*;
+
+  // Independent data clocks; both configuration ports use clk_a.
+  // AXIS frequency must be at least one quarter of the transmit bit-clock frequency.
+  // +SLOW_ACLK selects a diagnostic case that violates this constraint.
+  logic clk_a = 0, clk_b = 0, bclk_a = 0, bclk_b = 0, rstn = 0;
+  real  ha_ps = 1250.0, hb_ps = 1287.5;
+  initial if ($test$plusargs("SLOW_ACLK")) begin
+    ha_ps = 5000.0;
+    hb_ps = 5150.0;
+  end
+  always #(ha_ps) clk_a  = ~clk_a;
+  always #(hb_ps) clk_b  = ~clk_b;
+  always #0.500ns bclk_a = ~bclk_a;
+  always #0.5075ns bclk_b = ~bclk_b;
+
+  int unsigned errs = 0, checks = 0;
+  task automatic chk(input bit c, input string m);
+    checks++;
+    if (!c) begin
+      errs++;
+      $display("FAIL: %s @%0t", m, $time);
+    end
+  endtask
+
+  // Configuration-chain master.
+  logic        db_go;
+  logic [1:0]  kind, inst;
+  logic [31:0] wdata, rdata;
+  logic        busy, dvld;
+  logic [32:0] ccm_din;
+  logic        ccm_din_vld;
+  logic [31:0] a_dout;
+  logic        a_dout_vld;
+
+  tj_cfgchain_master u_ccm (
+    .clk(clk_a), .rst_n(rstn),
+    .db_go(db_go), .kind(kind), .inst(inst), .wdata(wdata),
+    .rdata_o(rdata), .busy_o(busy), .dvld_set_o(dvld),
+    .din(ccm_din), .din_vld(ccm_din_vld),
+    .dout(a_dout), .dout_vld(a_dout_vld)
+  );
+
+  // Two chip LVDS instances with chained configuration and crossed differential I/O.
+  logic [1:0]  a_idn, b_idn;
+  logic [3:0]        a_sv, a_sr, a_mv, a_mr, b_sv, b_sr, b_mv, b_mr;
+  logic [3:0][95:0]  a_sd, a_md, b_sd, b_md;
+  logic [32:0] a2b_din;
+  logic        a2b_vld;
+  logic [31:0] b2a_dout;
+  logic        b2a_vld;
+  logic        a_err, b_err, a_sm, b_sm;
+  wire [2:0]        ab_c_p, ab_c_n, ba_c_p, ba_c_n;
+  wire [2:0][4:0]   ab_d_p, ab_d_n, ba_d_p, ba_d_n;
+
+  tj_lnk_plug_chip u_a (
+    .core_id(2'd0), .core_id_next(a_idn),
+    .apb_pclk(clk_a), .axis_brg_clk(clk_a), .lvds_tx_bclk(bclk_a), .rstn_raw(rstn),
+    .s_tvalid(a_sv), .s_tready(a_sr), .s_tdata(a_sd),
+    .m_tvalid(a_mv), .m_tready(a_mr), .m_tdata(a_md),
+    .cfg_din(ccm_din), .cfg_din_vld(ccm_din_vld),
+    .cfg_dout(a_dout), .cfg_dout_vld(a_dout_vld),
+    .cfg_din_next(a2b_din), .cfg_din_next_vld(a2b_vld),
+    .cfg_dout_next(b2a_dout), .cfg_dout_next_vld(b2a_vld),
+    .err_intr(a_err), .send_mode(a_sm),
+    .txc_p(ab_c_p), .txc_n(ab_c_n), .txd_p(ab_d_p), .txd_n(ab_d_n),
+    .rxc_p(ba_c_p), .rxc_n(ba_c_n), .rxd_p(ba_d_p), .rxd_n(ba_d_n)
+  );
+
+  tj_lnk_plug_chip u_b (
+    .core_id(a_idn), .core_id_next(b_idn),
+    .apb_pclk(clk_a), .axis_brg_clk(clk_b), .lvds_tx_bclk(bclk_b), .rstn_raw(rstn),
+    .s_tvalid(b_sv), .s_tready(b_sr), .s_tdata(b_sd),
+    .m_tvalid(b_mv), .m_tready(b_mr), .m_tdata(b_md),
+    .cfg_din(a2b_din), .cfg_din_vld(a2b_vld),
+    .cfg_dout(b2a_dout), .cfg_dout_vld(b2a_vld),
+    .cfg_din_next(), .cfg_din_next_vld(),
+    .cfg_dout_next(32'h0), .cfg_dout_next_vld(1'b0),
+    .err_intr(b_err), .send_mode(b_sm),
+    .txc_p(ba_c_p), .txc_n(ba_c_n), .txd_p(ba_d_p), .txd_n(ba_d_n),
+    .rxc_p(ab_c_p), .rxc_n(ab_c_n), .rxd_p(ab_d_p), .rxd_n(ab_d_n)
+  );
+
+  // Register access through the public configuration-master ports.
+  task automatic cc_op(input [1:0] k, input [1:0] i, input [31:0] w);
+    @(posedge clk_a);
+    kind <= k;
+    inst <= i;
+    wdata <= w;
+    @(posedge clk_a);
+    db_go <= 1'b1;
+    @(posedge clk_a);
+    db_go <= 1'b0;
+    @(posedge clk_a);
+    while (busy) @(posedge clk_a);
+  endtask
+
+
+  task automatic cc_write(input [1:0] i, input [24:0] a, input [31:0] d);
+    cc_op(2'd0, i, {7'h0, a});
+    cc_op(2'd1, i, d);
+  endtask
+
+  bit saw_dvld;
+  always @(posedge clk_a) if (dvld) saw_dvld = 1;
+  task automatic cc_read(input [1:0] i, input [24:0] a, output [31:0] d);
+    saw_dvld = 0;
+    cc_op(2'd2, i, {7'h0, a});
+    repeat (2) @(posedge clk_a);
+    chk(saw_dvld, $sformatf("Instance %0d read %h returned no data", i, a));
+    d = rdata;
+  endtask
+
+  // Latch error events until the end of the traffic phase.
+  bit a_err_seen, b_err_seen;
+  always @(posedge clk_a) begin
+    if (a_err) a_err_seen <= 1'b1;
+    if (b_err) b_err_seen <= 1'b1;
+  end
+
+  // Collect accepted packets per logical port.
+  logic [95:0] rxq_b [4][$];
+  logic [95:0] rxq_a [4][$];
+  always @(posedge clk_b) for (int p = 0; p < 4; p++)
+    if (b_mv[p] && b_mr[p]) rxq_b[p].push_back(b_md[p]);
+  always @(posedge clk_a) for (int p = 0; p < 4; p++)
+    if (a_mv[p] && a_mr[p]) rxq_a[p].push_back(a_md[p]);
+
+  // Random backpressure in each receiver clock domain.
+  always @(posedge clk_b) for (int p = 0; p < 4; p++) b_mr[p] <= ($urandom_range(0,3) != 0);
+  always @(posedge clk_a) for (int p = 0; p < 4; p++) a_mr[p] <= ($urandom_range(0,3) != 0);
+
+  task automatic send_a(input int p, input logic [95:0] d);
+    @(posedge clk_a);
+    a_sd[p] <= d;
+    a_sv[p] <= 1'b1;
+    @(posedge clk_a);
+    while (!a_sr[p]) @(posedge clk_a);
+    a_sv[p] <= 1'b0;
+  endtask
+  task automatic send_b(input int p, input logic [95:0] d);
+    @(posedge clk_b);
+    b_sd[p] <= d;
+    b_sv[p] <= 1'b1;
+    @(posedge clk_b);
+    while (!b_sr[p]) @(posedge clk_b);
+    b_sv[p] <= 1'b0;
+  endtask
+
+  localparam int N_PKT = 40;
+
+  // 0x211F enables auto-sleep; +GRP210F disables it.
+  logic [31:0] GRP_PARAM = (8 << 10) | (8 << 5) | 5'h1F;
+  initial if ($test$plusargs("GRP210F")) GRP_PARAM = (8 << 10) | (8 << 5) | 5'h0F;
+  logic [95:0] exp_ab [4][$];
+  logic [95:0] exp_ba [4][$];
+  logic [31:0] rd32;
+  logic [95:0] pkt;
+
+  initial begin
+    db_go = 0;
+    kind = '0;
+    inst = '0;
+    wdata = '0;
+    a_sv = '0;
+    a_sd = '0;
+    b_sv = '0;
+    b_sd = '0;
+    #1us rstn = 1;
+    #2us;
+
+    // T1: Instance selection and register readback.
+    chk(a_idn === 2'd1 && b_idn === 2'd2, "Chained instance IDs");
+    cc_write(2'd0, 25'h64, 32'h0000_1234);
+    cc_read (2'd0, 25'h64, rd32);
+    chk(rd32[15:0] === 16'h1234, $sformatf("Instance 0 readback: %h", rd32));
+    cc_write(2'd1, 25'h64, 32'h0000_2345);
+    cc_read (2'd1, 25'h64, rd32);
+    chk(rd32[15:0] === 16'h2345, $sformatf("Instance 1 readback: %h", rd32));
+    cc_read (2'd0, 25'h64, rd32);
+    chk(rd32[15:0] === 16'h1234, "Instance 0 remains unchanged");
+
+    // T2: Configure three physical links and enable packet traffic.
+    for (int i = 0; i < 2; i++) begin
+      cc_write(2'(i), 25'h04, GRP_PARAM);
+      cc_write(2'(i), 25'h24, GRP_PARAM);
+      cc_write(2'(i), 25'h44, GRP_PARAM);
+      cc_write(2'(i), 25'h00, 32'h4);
+
+      cc_write(2'(i), 25'h200, 32'h0);
+
+    end
+    #5us;
+
+    // Clear startup errors before monitoring traffic.
+    for (int i = 0; i < 2; i++) begin
+      cc_read (2'(i), 25'h204, rd32);
+      chk(rd32[11:0] != '0, $sformatf("Instance %0d startup errors must be latched: %h", i, rd32));
+      cc_write(2'(i), 25'h204, 32'hFFF);
+      cc_read (2'(i), 25'h204, rd32);
+      chk(rd32 === 32'h0, $sformatf("Instance %0d ERR_ST after clear: %h", i, rd32));
+    end
+    a_err_seen = 0;
+    b_err_seen = 0;
+
+    // T3: Exercise all four logical ports in both directions.
+    for (int p = 0; p < 4; p++) begin
+      for (int n = 0; n < N_PKT; n++) begin
+
+        pkt = {({$urandom, $urandom} & 64'hFFFF_FFFF_FFFF_FFFF),
+               14'($urandom), 6'($urandom), 6'($urandom), 2'(p), 4'b0010};
+        exp_ab[p].push_back(pkt);
+        send_a(p, pkt);
+      end
+    end
+    for (int p = 0; p < 4; p++) begin
+      for (int n = 0; n < N_PKT; n++) begin
+        pkt = {({$urandom, $urandom} & 64'hFFFF_FFFF_FFFF_FFFF),
+               14'($urandom), 6'($urandom), 6'($urandom), 2'(p), 4'b0010};
+        exp_ba[p].push_back(pkt);
+        send_b(p, pkt);
+      end
+    end
+    #20us;
+
+    // Packets can arrive out of order across physical links; compare per-port multisets.
+    for (int p = 0; p < 4; p++) begin
+      logic [95:0] eq[$], gq[$];
+      chk(rxq_b[p].size() == N_PKT,
+          $sformatf("A to B port %0d received %0d/%0d", p, rxq_b[p].size(), N_PKT));
+      eq = exp_ab[p];
+      gq = rxq_b[p];
+      eq.sort();
+      gq.sort();
+      for (int n = 0; n < gq.size() && n < N_PKT; n++)
+        chk(gq[n] === eq[n],
+            $sformatf("A to B port %0d packet %0d: %h vs %h", p, n, gq[n], eq[n]));
+      chk(rxq_a[p].size() == N_PKT,
+          $sformatf("B to A port %0d received %0d/%0d", p, rxq_a[p].size(), N_PKT));
+      eq = exp_ba[p];
+      gq = rxq_a[p];
+      eq.sort();
+      gq.sort();
+      for (int n = 0; n < gq.size() && n < N_PKT; n++)
+        chk(gq[n] === eq[n],
+            $sformatf("B to A port %0d packet %0d: %h vs %h", p, n, gq[n], eq[n]));
+    end
+
+    // T4: Check latched error events and both error-status registers.
+    chk(!a_err_seen && !b_err_seen, "No error interrupt during packet traffic");
+    cc_read(2'd0, 25'h204, rd32);
+    chk(rd32 === 32'h0, $sformatf("A.ERR_ST must be zero: %h", rd32));
+    cc_read(2'd1, 25'h204, rd32);
+    chk(rd32 === 32'h0, $sformatf("B.ERR_ST must be zero: %h", rd32));
+
+    if (checks > 0 && errs == 0) $display("LNK TB PASS (%0d checks)", checks);
+    else           $display("LNK TB FAIL (%0d/%0d)", errs, checks);
+    $finish;
+  end
+
+  initial begin
+    #2ms;
+    $fatal(1, "LNK TB TIMEOUT");
+  end
+
+endmodule
