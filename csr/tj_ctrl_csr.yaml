@@ -52,7 +52,7 @@ blocks:
           - name: SRST
             bits: 0
             kind: PULSE
-            desc: "写1发起引擎软复位请求，读回0；不清除CSR配置。SEND停止新请求，排空在途AXI后归闲，不置DONE/ERR；RECV清空通道缓冲并暂时停收，排空在途B响应后恢复，保留WPTR/RPTR。"
+            desc: "写1发起引擎软复位请求，读回0；不清除CSR配置。SEND停止新AXI请求和记录装填，等待在途AXI及已挂出的LVDS包收尾后归闲；中止本身不置DONE/ERR，已交付包仍计SENT并按记录IRQ标志通知；RECV清空通道缓冲并暂时停收，排空在途B响应后恢复，保留WPTR/RPTR。"
 
       - name: STA
         offset: 0x10
@@ -71,7 +71,7 @@ blocks:
           - name: SEND_BUSY
             bits: 9
             kind: RO
-            desc: "SEND 整体忙状态，包含取数和分发。"
+            desc: "SEND整体忙状态，包含取数、分发及事件送达等待。"
 
           - name: CC_BUSY
             bits: 10
@@ -350,22 +350,22 @@ blocks:
           - name: BUSY
             bits: 0
             kind: RO
-            desc: "发送中(取数或分发未清)"
+            desc: "启动准备、取数、分发或本表事件送达等待中。"
 
           - name: DONE
             bits: 8
             kind: W1C
-            desc: "本表处理完成(有错也置,错误详情看 ERR)"
+            desc: "本表处理完成（有错也置，错误详情看ERR）；在pclk侧观察到BUSY清零后置位。"
 
           - name: ERR
             bits: 9
             kind: W1C
-            desc: "AXI 读错(表中止)或记录非法/通道未使能(该记录丢弃、表继续)"
+            desc: "AXI读错（表中止）或记录非法/通道未使能（该记录丢弃、表继续）。同表错误合并上报，在本表DONE前置位；软件启动新任务前应清除旧状态。"
 
       - name: SENT
         offset: 0x14
         kind: RO
-        desc: "缝上被接受的记录计数(门铃清零;丢弃不计;跨域直采——运行中读数为参考值,DONE 后精确)"
+        desc: "已被LVDS接口接受的记录数；源域在新任务启动时清零，丢弃记录不计。通过整字快照跨域，读值可能滞后；DONE不保证最终计数已刷新，连续读值相同也不证明已取得终值。"
 
   # LVDS-to-DDR receive rings.
   - name: RECV
