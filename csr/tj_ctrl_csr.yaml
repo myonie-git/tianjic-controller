@@ -52,7 +52,7 @@ blocks:
           - name: SRST
             bits: 0
             kind: PULSE
-            desc: "写1发起引擎软复位请求，读回0；不清除CSR配置。SEND停止新AXI请求和记录装填，等待在途AXI及已挂出的LVDS包收尾后归闲；中止本身不置DONE/ERR，已交付包仍计SENT并按记录IRQ标志通知；RECV清空通道缓冲并暂时停收，排空在途B响应后恢复，保留WPTR/RPTR。"
+            desc: "写1发起引擎软复位请求，读回0；不清除CSR配置。SEND停止新AXI请求和记录装填，等待在途AXI及已挂出的LVDS包收尾后归闲；中止本身不置DONE/ERR，已交付包仍计SENT并按记录IRQ标志通知；RECV清空尚未提交的通道缓冲，等待在途B响应后恢复，保留WPTR/RPTR；已使能通道在中止及排空期间按OVF_POLICY反压或丢弃并置OVF。"
 
       - name: STA
         offset: 0x10
@@ -379,18 +379,18 @@ blocks:
       - name: RING_LO
         offset: 0x00
         kind: RW
-        desc: "DDR 环形缓冲基址 [31:0],64B 对齐;仅 EN=0 时修改(跨域采样契约)"
+        desc: "DDR 环形缓冲基址[31:0]，64B对齐；仅EN=0时修改，重新使能前等待配置跨域稳定。写地址在收包时锁存，关闭通道不会取消已收记录；回收旧缓冲区前仍须确认旧写已结束。"
 
       - name: RING_HI
         offset: 0x04
         kind: RW
         bits: "15:0"
-        desc: "环形缓冲基址 [47:32]"
+        desc: "环形缓冲基址[47:32]；使用约定同RING_LO。"
 
       - name: SIZE
         offset: 0x08
         kind: RW
-        desc: "环容量(记录条数,2 的幂);仅 EN=0 时修改"
+        desc: "环容量，单位为记录条数，须为2的幂；仅EN=0时修改。修改不改变已缓冲记录的写地址；重新使能前等待配置跨域稳定。"
 
       - name: WMARK
         offset: 0x0C
@@ -409,7 +409,7 @@ blocks:
           - name: OVF_POLICY
             bits: 1
             kind: RW
-            desc: "环满策略 0=丢新包(计 OVF)1=反压链路(REQ-DAT-14 二级)"
+            desc: "环满或软中止排空期间的处理策略：0=丢弃新包并置OVF，1=反压链路。"
 
           - name: IE_WMARK
             bits: 8
@@ -423,7 +423,7 @@ blocks:
 
       - name: STA
         offset: 0x14
-        desc: "通道状态(事件位按 B 落地口径置位——中断到达时记录必已在 DDR;密集事件限速合并为一次置位,计数以 WPTR/LEVEL 为准)"
+        desc: "接收通道状态。水线和END事件按写响应置位，进度快照可能稍后刷新；写入是否成功须结合AXI写错误状态判断。"
         fields:
           - name: WMARK_HIT
             bits: 0
@@ -433,27 +433,27 @@ blocks:
           - name: ENDPKT
             bits: 1
             kind: W1C
-            desc: "END 包(ptype=0100)记录落地;该记录 flags[0]=1"
+            desc: "END 记录的写响应完成；ptype[2]=1 且 ptype[0]=0，记录 flags[0]=1。"
 
           - name: OVF
             bits: 2
             kind: W1C
-            desc: "发生过丢包(策略 0 环满)"
+            desc: "已使能通道在环满或软中止排空期间按策略0丢弃了新包；写1清除。"
 
           - name: LEVEL
             bits: "31:16"
             kind: RO
-            desc: "当前在环记录数(跨域直采参考值;静默后精确)"
+            desc: "pclk域按WPTR快照减RPTR计算的未消费记录数，取低16位；容量达到65536条时应由软件使用完整指针计算。"
 
       - name: WPTR
         offset: 0x18
         kind: RO
-        desc: "硬件写指针=已落地记录累计数(自由递增,寻址=WPTR&(SIZE-1);跨域直采参考值)"
+        desc: "已完成写响应的累计记录数，含错误响应。通过整字快照返回，更新可能滞后于接收引擎。"
 
       - name: RPTR
         offset: 0x1C
         kind: RW
-        desc: "host 读指针(消费后回写同序列累计值;须单调、两次回写间隔 ≥4 pclk——硬件经两拍一致性滤波采信,撕裂过渡值被拒收)"
+        desc: "Host 已消费记录的累计值，消费完成后单调回写。通过整字快照送往接收引擎；空间释放在快照到达后生效，APB写完成不表示接收侧已更新。"
 
   # LVDS channel control.
   - name: LNK
@@ -471,14 +471,14 @@ blocks:
         offset: 0x04
         kind: RW
         reset: 0x76543210
-        desc: "逻辑 ch0~7 → 物理组号,4bit/ch(坐标保险丝:板间接线颠倒时软件补救)"
+        desc: "逻辑通道0～7到物理组的映射，每通道4位，SEND/RECV共用。接收映射须互不重复，越界项回落恒等。全部接收通道停用时修改，重新使能前须等待配置跨域稳定。"
 
       - name: REMAP1
         offset: 0x08
         kind: RW
         bits: "15:0"
         reset: 0xBA98
-        desc: "逻辑 ch8~11 → 物理组号,4bit/ch"
+        desc: "逻辑通道8～11到物理组的映射，每通道4位；使用约定同REMAP0。"
 
       - name: FC_TMO
         offset: 0x0C
