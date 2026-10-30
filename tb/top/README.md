@@ -5,6 +5,11 @@ pin outputs, interrupt groups and configuration-chain readback. CASE 1 checks
 continuous HI/LO/HI timestamp reads. CASE 2 checks all four prescalers, stopped
 count retention, timestamp clear and GLB soft reset.
 
+APB completion requires PREADY to be a known 1. The configuration-chain model
+checks the full read request against the programmed address and instance.
+Continuous timestamp reads must advance over the observation window; adjacent
+reads may return the same snapshot.
+
 ```sh
 python3 controller/tb/top/run_top_tb.py --work /tmp/tj_top_plain --seed 1
 python3 controller/tb/top/run_top_tb.py --work /tmp/tj_top_jitter --jitter --seed 1 --seed 2

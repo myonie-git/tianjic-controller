@@ -34,6 +34,7 @@ module tb_tj_ctrl_ts;
   always @(posedge pclk) begin
     if(!presetn)begin cfg_rsp_vld<=0;cfg_pending<=0;end
     else begin
+      if(cfg_vld) chk(cfg_din===33'h1_0000_0123,"CC request fields match the programmed address");
       cfg_pending<=cfg_vld&&cfg_din[32]&&!cfg_din[25];
       cfg_rsp_vld<=cfg_pending;
     end
@@ -51,7 +52,7 @@ module tb_tj_ctrl_ts;
     guard=0;
     @(posedge pclk);
     while(!pready && guard<10000)begin guard++;@(posedge pclk);end
-    chk(guard<10000,"APB completes");
+    chk(guard<10000 && pready===1'b1,"APB completes with known PREADY");
     chk(pslverr===expect_error,$sformatf("APB error at %h",addr));
     rd=prdata;
     @(negedge pclk);psel=0;penable=0;
@@ -65,7 +66,7 @@ module tb_tj_ctrl_ts;
   task automatic settle;
     repeat(16)@(negedge maxi_clk);repeat(8)@(negedge pclk);
   endtask
-  logic[31:0] a,b,hi1,hi2,prev;
+  logic[31:0] a,b,hi1,hi2,prev,first_ts;
   int divn,expected,bitno;
   realtime t0,t1;
   initial begin
@@ -118,11 +119,13 @@ module tb_tj_ctrl_ts;
       wr(16'h208,32'h100);settle();wr(16'h208,1);settle();prev=0;
       for(int n=0;n<1500;n++)begin
         rd(16'h210,hi1);rd(16'h20C,a);rd(16'h210,hi2);
+        if (n==0) first_ts=a;
         chk(hi1==0 && hi2==0,"timestamp high halves do not wrap in this test");
         if(hi1==hi2)begin
           chk(a>=prev,$sformatf("HI/LO/HI accepted backwards time %0d -> %0d",prev,a));prev=a;
         end
       end
+      chk(prev > first_ts,"running timestamp advances during continuous reads");
       wr(16'h208,0);settle();rd(16'h20C,a);repeat(20)@(negedge maxi_clk);rd(16'h20C,b);
       chk(a==b,"stopped timestamp is stable positive control");
     end
