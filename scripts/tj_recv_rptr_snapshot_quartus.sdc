@@ -4,6 +4,7 @@ set_false_path -to [get_keepers {*u_rptr|u_req*|meta_q*}]
 set_false_path -to [get_keepers {*u_rptr|u_ack*|meta_q*}]
 set_max_delay -from [get_keepers {*u_rptr|snap_q*}] \
               -to [get_keepers {*u_rptr|q*}] $TJ_RECV_MAXI_PERIOD
+# TODO(RECV-002): Check the hold constraint against the snapshot handshake.
 set_min_delay -from [get_keepers {*u_rptr|snap_q*}] \
               -to [get_keepers {*u_rptr|q*}] 0
 set_max_skew -get_skew_value_from_clock_period min_clock_period -skew_value_multiplier 1.0 \
