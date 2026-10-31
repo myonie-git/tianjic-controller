@@ -1,5 +1,9 @@
 # Controller top tests
 
+`tb_tj_ctrl_apb_smoke.sv` checks ID, SCRATCH, APB responses and chip reset outputs.
+The shared-library stage of `controller/scripts/run_regress.sh` runs this test.
+`run_top_tb.py` runs the separate timestamp and top-level control test below.
+
 `tb_tj_ctrl_ts.sv` uses public APB and top-level ports. CASE 0 checks APB routing,
 pin outputs, interrupt groups and configuration-chain readback. CASE 1 checks
 continuous HI/LO/HI timestamp reads. CASE 2 checks all four prescalers, stopped
