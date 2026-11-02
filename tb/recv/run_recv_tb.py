@@ -34,6 +34,8 @@ def main():
         'rtl/dma/tj_send_engine.sv', 'rtl/dma/tj_send_subsys.sv',
         'rtl/dma/tj_axi_rd_backend.sv', 'rtl/dma/tj_recv_engine.sv',
         'rtl/dma/tj_recv_subsys.sv', 'rtl/dma/tj_axi_wr_backend.sv',
+        'rtl/dma/tj_mem_rd_mux.sv', 'rtl/boot/tj_boot_engine.sv',
+        'rtl/boot/tj_boot_subsys.sv',
     ]
 
     def step(name, command, simulation=False):

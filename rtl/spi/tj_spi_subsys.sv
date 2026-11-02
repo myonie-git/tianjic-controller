@@ -1,6 +1,6 @@
 // File        : tj_spi_subsys.sv
 // Module      : tj_spi_subsys
-// Description : Eight SPI groups with CSR doorbells and a shared APB window.
+// Description : Eight SPI groups shared by CSR doorbells, SPIWIN and BOOT.
 //               Four dies per group; pclk domain, active-low asynchronous reset.
 
 // CSR-controlled single-word SPI transactions.
@@ -193,6 +193,89 @@ module tj_spi_arb2 (
   end
 endmodule
 
+// -----------------------------------------------------------------------------
+// 全局主 2:1 仲裁(批次 BOOT):A=SPIWIN(host 交互,高优先) B=BOOT 引擎
+// 授权按事务保持(cmd 接受 → done/err);合流后走既有组 demux,组内零改动
+// -----------------------------------------------------------------------------
+module tj_spi_gmux (
+  input  logic        clk,
+  input  logic        rst_n,
+  // A 口(SPIWIN)
+  input  logic        a_cmd_valid,
+  output logic        a_cmd_ready,
+  input  logic [4:0]  a_die,
+  input  logic [1:0]  a_kind,
+  input  logic [31:0] a_addr,
+  input  logic        a_wdat_valid,
+  output logic        a_wdat_ready,
+  input  logic [31:0] a_wdat,
+  output logic        a_rdat_valid,
+  input  logic        a_rdat_ready,
+  output logic        a_done,
+  output logic        a_err,
+  // B 口(BOOT)
+  input  logic        b_cmd_valid,
+  output logic        b_cmd_ready,
+  input  logic [4:0]  b_die,
+  input  logic [1:0]  b_kind,
+  input  logic [31:0] b_addr,
+  input  logic        b_wdat_valid,
+  output logic        b_wdat_ready,
+  input  logic [31:0] b_wdat,
+  output logic        b_rdat_valid,
+  input  logic        b_rdat_ready,
+  output logic        b_done,
+  output logic        b_err,
+  // 合流主口(接组 demux)
+  output logic        m_cmd_valid,
+  input  logic        m_cmd_ready,
+  output logic [4:0]  m_die,
+  output logic [1:0]  m_kind,
+  output logic [31:0] m_addr,
+  output logic        m_wdat_valid,
+  input  logic        m_wdat_ready,
+  output logic [31:0] m_wdat,
+  input  logic        m_rdat_valid,
+  output logic        m_rdat_ready,
+  input  logic        m_done,
+  input  logic        m_err
+);
+  typedef enum logic [1:0] {M_NONE, M_A, M_B} g_e;
+  g_e g_q;
+  wire pick_a = (g_q == M_NONE) ? a_cmd_valid : (g_q == M_A);
+  wire pick_b = (g_q == M_NONE) ? (!a_cmd_valid && b_cmd_valid) : (g_q == M_B);
+
+  assign m_cmd_valid  = pick_a ? a_cmd_valid  : pick_b ? b_cmd_valid  : 1'b0;
+  assign m_die        = pick_a ? a_die        : b_die;
+  assign m_kind       = pick_a ? a_kind       : b_kind;
+  assign m_addr       = pick_a ? a_addr       : b_addr;
+  assign m_wdat_valid = pick_a ? a_wdat_valid : pick_b ? b_wdat_valid : 1'b0;
+  assign m_wdat       = pick_a ? a_wdat       : b_wdat;
+  assign m_rdat_ready = pick_a ? a_rdat_ready : pick_b ? b_rdat_ready : 1'b1;
+
+  assign a_cmd_ready  = pick_a && m_cmd_ready;
+  assign b_cmd_ready  = pick_b && m_cmd_ready;
+  assign a_wdat_ready = pick_a && m_wdat_ready;
+  assign b_wdat_ready = pick_b && m_wdat_ready;
+  assign a_rdat_valid = pick_a && m_rdat_valid;
+  assign b_rdat_valid = pick_b && m_rdat_valid;
+  assign a_done = pick_a && m_done;
+  assign b_done = pick_b && m_done;
+  assign a_err  = pick_a && m_err;
+  assign b_err  = pick_b && m_err;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) g_q <= M_NONE;
+    else begin
+      if (g_q == M_NONE) begin
+        if (m_cmd_valid && m_cmd_ready) g_q <= pick_a ? M_A : M_B;
+      end else if (m_done || m_err) begin
+        g_q <= M_NONE;
+      end
+    end
+  end
+endmodule
+
 // APB window for 32-bit SPI reads and writes.
 // APB waits for SPI completion; disabled accesses and timeouts return PSLVERR.
 module tj_spiwin (
@@ -306,6 +389,20 @@ module tj_spi_subsys
   output logic [7:0]       spi_err_set_o,
   output logic             spiwin_busy_o,
   output logic             spiwin_err_set_o,
+  // BOOT 引擎全局事务主口(批次 BOOT;经 gmux 与 SPIWIN 合流)
+  input  logic          bt_cmd_valid,
+  output logic          bt_cmd_ready,
+  input  logic [4:0]    bt_die,
+  input  logic [1:0]    bt_kind,
+  input  logic [31:0]   bt_addr,
+  input  logic          bt_wdat_valid,
+  output logic          bt_wdat_ready,
+  input  logic [31:0]   bt_wdat,
+  output logic          bt_rdat_valid,
+  input  logic          bt_rdat_ready,
+  output logic [31:0]   bt_rdat,
+  output logic          bt_done,
+  output logic          bt_err,
   // APB window interface.
   input  logic          win_psel,
   input  logic          win_penable,
@@ -322,7 +419,15 @@ module tj_spi_subsys
   input  logic [N_DIE-1:0]     spi_miso
 );
 
-  // Shared SPIWIN transaction signals.
+  // SPIWIN request signals.
+  logic        ww_cmd_valid, ww_cmd_ready;
+  logic [4:0]  ww_die;
+  logic [1:0]  ww_kind;
+  logic [31:0] ww_addr, ww_wdat;
+  logic        ww_wdat_valid, ww_wdat_ready;
+  logic        ww_rdat_valid, ww_rdat_ready;
+  logic        ww_done, ww_err;
+  // Shared global master to the group dispatch logic.
   logic        w_cmd_valid, w_cmd_ready;
   logic [4:0]  w_die;
   logic [1:0]  w_kind;
@@ -331,6 +436,8 @@ module tj_spi_subsys
   logic        w_rdat_valid, w_rdat_ready;
   logic [31:0] w_rdat;
   logic        w_done, w_err;
+
+  assign bt_rdat = w_rdat;
 
   // Responses from each group's arbiter A port.
   logic [N_SPI_GRP-1:0] g_cmd_ready, g_wdat_ready, g_rdat_valid, g_done, g_err;
@@ -351,11 +458,30 @@ module tj_spi_subsys
     .pready(win_pready), .pslverr(win_pslverr), .prdata(win_prdata),
     .en(hwo.spiwin_ctrl_en), .page_die(hwo.spiwin_page_die), .offs(hwo.spiwin_offs),
     .busy_o(spiwin_busy_o), .err_set_o(spiwin_err_set_o),
-    .cmd_valid(w_cmd_valid), .cmd_ready(w_cmd_ready),
-    .die_id(w_die), .cmd_kind(w_kind), .addr(w_addr),
-    .wdat_valid(w_wdat_valid), .wdat_ready(w_wdat_ready), .wdat(w_wdat),
-    .rdat_valid(w_rdat_valid), .rdat_ready(w_rdat_ready), .rdat(w_rdat),
-    .done(w_done), .err_timeout(w_err)
+    .cmd_valid(ww_cmd_valid), .cmd_ready(ww_cmd_ready),
+    .die_id(ww_die), .cmd_kind(ww_kind), .addr(ww_addr),
+    .wdat_valid(ww_wdat_valid), .wdat_ready(ww_wdat_ready), .wdat(ww_wdat),
+    .rdat_valid(ww_rdat_valid), .rdat_ready(ww_rdat_ready), .rdat(w_rdat),
+    .done(ww_done), .err_timeout(ww_err)
+  );
+
+  tj_spi_gmux u_gmux (
+    .clk(pclk), .rst_n(presetn),
+    .a_cmd_valid(ww_cmd_valid), .a_cmd_ready(ww_cmd_ready),
+    .a_die(ww_die), .a_kind(ww_kind), .a_addr(ww_addr),
+    .a_wdat_valid(ww_wdat_valid), .a_wdat_ready(ww_wdat_ready), .a_wdat(ww_wdat),
+    .a_rdat_valid(ww_rdat_valid), .a_rdat_ready(ww_rdat_ready),
+    .a_done(ww_done), .a_err(ww_err),
+    .b_cmd_valid(bt_cmd_valid), .b_cmd_ready(bt_cmd_ready),
+    .b_die(bt_die), .b_kind(bt_kind), .b_addr(bt_addr),
+    .b_wdat_valid(bt_wdat_valid), .b_wdat_ready(bt_wdat_ready), .b_wdat(bt_wdat),
+    .b_rdat_valid(bt_rdat_valid), .b_rdat_ready(bt_rdat_ready),
+    .b_done(bt_done), .b_err(bt_err),
+    .m_cmd_valid(w_cmd_valid), .m_cmd_ready(w_cmd_ready),
+    .m_die(w_die), .m_kind(w_kind), .m_addr(w_addr),
+    .m_wdat_valid(w_wdat_valid), .m_wdat_ready(w_wdat_ready), .m_wdat(w_wdat),
+    .m_rdat_valid(w_rdat_valid), .m_rdat_ready(w_rdat_ready),
+    .m_done(w_done), .m_err(w_err)
   );
 
   for (genvar g = 0; g < N_SPI_GRP; g++) begin : g_grp

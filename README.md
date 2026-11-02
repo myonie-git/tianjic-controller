@@ -2,7 +2,7 @@
 
 面向两颗 Yawing04 芯片、共32个 die 的 FPGA 控制器，提供 Host 寄存器访问、
 芯片 SPI 控制以及 DDR 与 LVDS 之间的数据收发。
-当前顶层集成 CSR、SPI、SEND、RECV、配置链主机、时间戳和中断汇总。
+当前顶层集成 CSR、SPI、BOOT、SEND、RECV、配置链主机、时间戳和中断汇总。
 
 ## 模块与目录
 
@@ -12,7 +12,8 @@
 | `rtl/pkg/` | 常量、记录格式和数据类型 |
 | `rtl/csr/` | 生成的寄存器 RTL |
 | `rtl/top/` | 顶层连接、APB 分路、时间戳和中断汇总 |
-| `rtl/spi/` | SPI 引擎、门铃、仲裁和 SPIWIN 窗口 |
+| `rtl/spi/` | SPI 引擎、门铃、SPIWIN/BOOT仲裁和 SPIWIN 窗口 |
+| `rtl/boot/` | BOOT子系统封装、装载控制及64字节取数前端 |
 | `rtl/dma/` | SEND 取数与分发、RECV 环形写入、AXI 后端及指针快照同步 |
 | `rtl/lnk/` | FPGA 侧配置链主机，以及仿真用的直连和芯片 LVDS 适配模块 |
 | `rtl/common/` | 电平、脉冲、事件及整字快照同步单元 |
@@ -24,6 +25,7 @@
 
 现有 RTL 模块通过平铺端口连接；`rtl/pkg/tj_ctrl_if.sv` 保留了接口声明，尚未用于这些连接。
 生产清单包含 Controller RTL；仿真清单另加 `tj_lnk_plugs.sv`，芯片模型依赖由对应测试清单提供。
+BOOT由`tj_boot_subsys`连接控制引擎和取数前端；共享读仲裁位于顶层，SPI仲裁位于SPI子系统。
 
 ## 主要接口约定
 
@@ -45,6 +47,13 @@ SEND 的标志位为 LAST(bit0)、FENCE(bit1)、IRQ(bit2)，按记录中的逻�
 SEND 表起始地址要求64字节对齐。RECV 按通道写入环形缓冲，Host 读取后更新 RPTR 归还空间。
 跨域计数和指针通过快照读回，可能滞后于数据通路；具体操作顺序见寄存器及模块说明。
 
+BOOT 在 `maxi_clk` 请求到达时锁存 64 字节对齐的块地址。集成时先定义时钟并设置
+`TJ_BOOT_MAXI_PERIOD`（`maxi_clk` 周期，单位 ns），再按工具加载
+`scripts/tj_boot_fetch_addr.sdc`、`tj_boot_fetch_addr_quartus.sdc` 或 `tj_boot_fetch_addr_vivado.xdc`。
+仅将请求翻转到同步器首级的控制路径设为异步输入。42 位地址数据路径须参与时序分析。
+本次 Cyclone 10 GX 实现覆盖三档时钟，布线时采用 2.4 ns 地址预算和 0.30 ns 的
+`TJ_BOOT_FIT_HOLD_MARGIN`。签核时取消这个布线裕量，按实际 `maxi_clk` 周期检查建立和保持。
+
 ## 工具与测试入口
 
 以下命令从仓库根目录执行，Shell 示例采用 sh/bash 语法。
@@ -64,12 +73,16 @@ REGRESS_WORK="$regress_work" sh controller/scripts/run_regress.sh
 ```
 
 该入口运行生成物一致性、CSR、SPI、顶层展开、APB冒烟、lint、镜像工具与格式、
-初始化重放、LVDS链路、SEND和RECV检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 种子，
+初始化重放、LVDS链路、SEND、RECV和BOOT检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 种子，
 `IMAGE_CASE` 选择镜像用例；`SKIP_APB_SMOKE`、`SKIP_SG`、`SKIP_LNK` 可跳过对应项目。
 工具或用例不可用时，部分项目也会跳过，运行结果须结合日志中的跳过项查看。
 
 镜像阶段先运行 Python CLI 测试，检查地址段、比较器和各核 CONFIG，再用 SV 核对记录及内存数据。
 初始化重放测例执行 W/P 命令，F 标记跳过并计数，idle 由存储模型预置。
+BOOT 测例 [tb_tj_boot.sv](tb/boot/tb_tj_boot.sv) 通过 die 0 的 `spi2ahb` 比对 AHB 写入。
+它检查等待 DDR 时中止、原语写入中止、首次通过 APB 读到 `BUSY=0` 时的 `DONE/ERR`、DST 边界和装载期间的 SPIWIN 读取。
+回归的 BOOT 阶段共用一次编译，按三组 `pclk/maxi_clk` 频率运行（MHz）：100/416.7、250/50、10/100。
+芯片模型的 AHB 时钟固定为 100 MHz。
 专项测试及其时钟、抖动配置使用各自入口：
 
 | 测试 | 说明 |

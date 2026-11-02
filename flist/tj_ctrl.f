@@ -9,6 +9,9 @@ ${TJ_CTRL_HOME}/rtl/common/tj_cdc.sv
 ${TJ_CTRL_HOME}/rtl/lnk/tj_cfgchain_master.sv
 ${TJ_CTRL_HOME}/rtl/dma/tj_axi_rd_backend.sv
 ${TJ_CTRL_HOME}/rtl/dma/tj_axi_wr_backend.sv
+${TJ_CTRL_HOME}/rtl/dma/tj_mem_rd_mux.sv
+${TJ_CTRL_HOME}/rtl/boot/tj_boot_engine.sv
+${TJ_CTRL_HOME}/rtl/boot/tj_boot_subsys.sv
 ${TJ_CTRL_HOME}/rtl/dma/tj_send_fetch.sv
 ${TJ_CTRL_HOME}/rtl/dma/tj_send_engine.sv
 ${TJ_CTRL_HOME}/rtl/dma/tj_send_subsys.sv

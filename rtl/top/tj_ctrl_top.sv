@@ -142,6 +142,24 @@ module tj_ctrl_top
   logic [7:0]          mrd_req_len;
   logic                mrd_rsp_valid, mrd_rsp_ready, mrd_rsp_last, mrd_rsp_err;
   logic [127:0]        mrd_rsp_data;
+  // BOOT status, SPI transactions and memory requests.
+  logic        boot_busy_w, boot_done_w, boot_err_w;
+  logic [3:0]  boot_code_w;
+  logic        bt_cmd_valid_w, bt_cmd_ready_w, bt_wdat_valid_w, bt_wdat_ready_w;
+  logic        bt_rdat_valid_w, bt_rdat_ready_w, bt_done_w, bt_err_w;
+  logic [4:0]  bt_die_w;
+  logic [1:0]  bt_kind_w;
+  logic [31:0] bt_addr_w, bt_wdat_w, bt_rdat_w;
+  logic                bfm_req_valid, bfm_req_ready;
+  logic [AXI_AW-1:0]   bfm_req_addr;
+  logic [7:0]          bfm_req_len;
+  logic                bfm_rsp_valid, bfm_rsp_ready;
+  logic                mm_req_valid, mm_req_ready;
+  logic [AXI_AW-1:0]   mm_req_addr;
+  logic [7:0]          mm_req_len;
+  logic                mm_rsp_valid, mm_rsp_ready;
+  logic [127:0]        mux_rsp_data, mrd_rsp_data_bk;
+  logic                mux_rsp_last, mux_rsp_err, mrd_rsp_last_bk, mrd_rsp_err_bk;
 
   logic [N_CH-1:0]       recv_wmark_set_w, recv_end_set_w, recv_ovf_set_w;
   logic                  recv_axi_werr_w;
@@ -157,11 +175,36 @@ module tj_ctrl_top
     .spi_rdata_o(spi_rdata_w), .spi_busy_o(spi_busy_w), .eng_busy_o(eng_busy_w),
     .spi_done_set_o(spi_done_w), .spi_err_set_o(spi_err_w),
     .spiwin_busy_o(spiwin_busy_w), .spiwin_err_set_o(spiwin_err_w),
+    .bt_cmd_valid(bt_cmd_valid_w), .bt_cmd_ready(bt_cmd_ready_w),
+    .bt_die(bt_die_w), .bt_kind(bt_kind_w), .bt_addr(bt_addr_w),
+    .bt_wdat_valid(bt_wdat_valid_w), .bt_wdat_ready(bt_wdat_ready_w), .bt_wdat(bt_wdat_w),
+    .bt_rdat_valid(bt_rdat_valid_w), .bt_rdat_ready(bt_rdat_ready_w), .bt_rdat(bt_rdat_w),
+    .bt_done(bt_done_w), .bt_err(bt_err_w),
     .win_psel(psel_win), .win_penable(penable), .win_pwrite(pwrite),
     .win_paddr(paddr[11:0]), .win_pwdata(pwdata),
     .win_pready(win_pready), .win_pslverr(win_pslverr), .win_prdata(win_prdata),
     .spi_sclk(spi_sclk), .spi_mosi(spi_mosi),
     .spi_cs_n(spi_cs_n), .spi_miso(spi_miso)
+  );
+
+  // BOOT loading through the shared memory and SPI paths.
+  tj_boot_subsys u_boot (
+    .pclk(pclk), .presetn(presetn), .maxi_clk(maxi_clk), .maxi_rstn(maxi_rstn),
+    .db_go(hwo.boot_db_go), .glb_srst(hwo.glb_ctrl_srst),
+    .csr_kind(hwo.boot_cmd_kind), .csr_die(hwo.boot_cmd_die),
+    .csr_src_lo(hwo.boot_src_lo), .csr_src_hi(hwo.boot_src_hi),
+    .csr_len(hwo.boot_len), .csr_dst(hwo.boot_dst),
+    .sta_busy(boot_busy_w), .sta_done_set(boot_done_w),
+    .sta_err_set(boot_err_w), .sta_err_code(boot_code_w),
+    .req_valid(bfm_req_valid), .req_ready(bfm_req_ready),
+    .req_addr(bfm_req_addr), .req_len(bfm_req_len),
+    .rsp_valid(bfm_rsp_valid), .rsp_ready(bfm_rsp_ready),
+    .rsp_data(mux_rsp_data), .rsp_last(mux_rsp_last), .rsp_err(mux_rsp_err),
+    .cmd_valid(bt_cmd_valid_w), .cmd_ready(bt_cmd_ready_w),
+    .die_id(bt_die_w), .cmd_kind(bt_kind_w), .addr(bt_addr_w),
+    .wdat_valid(bt_wdat_valid_w), .wdat_ready(bt_wdat_ready_w), .wdat(bt_wdat_w),
+    .rdat_valid(bt_rdat_valid_w), .rdat_ready(bt_rdat_ready_w), .rdat(bt_rdat_w),
+    .done(bt_done_w), .err_timeout(bt_err_w)
   );
 
   // Timestamp counter in maxi_clk; prescalers: /1, /16, /100, /1000.
@@ -216,7 +259,7 @@ module tj_ctrl_top
     hwi.spi_sta_err_tmo_set  = spi_err_w;
     hwi.spiwin_sta_busy      = spiwin_busy_w;
     hwi.spiwin_sta_err_tmo_set = spiwin_err_w;
-    hwi.glb_sta_spi_busy     = eng_busy_w;  // Includes SPIWIN activity.
+    hwi.glb_sta_spi_busy     = eng_busy_w;  // Includes SPIWIN and BOOT activity.
     hwi.cc_rdata             = cc_rdata_w;
     hwi.cc_sta_busy          = cc_busy_w;
     hwi.cc_sta_dvld_set      = cc_dvld_w;
@@ -226,6 +269,11 @@ module tj_ctrl_top
     hwi.send_sta_err_set     = send_err_w;
     hwi.send_sent            = send_sent_w;
     hwi.glb_sta_send_busy    = send_busy_w;
+    hwi.boot_sta_busy        = boot_busy_w;
+    hwi.boot_sta_done_set    = boot_done_w;
+    hwi.boot_sta_err_set     = boot_err_w;
+    hwi.boot_sta_err_code    = boot_code_w;
+    hwi.glb_sta_boot_busy    = boot_busy_w;
     hwi.recv_sta_wmark_hit_set = recv_wmark_set_w;
     hwi.recv_sta_endpkt_set  = recv_end_set_w;
     hwi.recv_sta_ovf_set     = recv_ovf_set_w;
@@ -233,6 +281,7 @@ module tj_ctrl_top
     hwi.recv_wptr            = recv_wptr_w;
 
     hwi.irq_raw_set[7:0]     = spi_done_w;
+    hwi.irq_raw_set[8]       = boot_done_w;
     hwi.irq_raw_set[9]       = send_irq_w;
     hwi.irq_raw_set[10]      = cc_dvld_w;
     for (int c = 0; c < N_CH; c++)
@@ -241,6 +290,7 @@ module tj_ctrl_top
     hwi.irq_raw_set[24]      = (|spi_err_w) | spiwin_err_w;
     hwi.irq_raw_set[27]      = |recv_ovf_set_w;
     hwi.irq_raw_set[28]      = send_axi_err_w | recv_axi_werr_w;
+    hwi.irq_raw_set[29]      = boot_err_w;
   end
 
   // Enabled IRQ groups: completion/control, receive, errors, reserved bit31.
@@ -319,14 +369,33 @@ module tj_ctrl_top
     .tx_tvalid(lv_tx_tvalid), .tx_tready(lv_tx_tready), .tx_tdata(lv_tx_tdata)
   );
 
+  // Shared AXI reads: A=SEND (priority), B=BOOT.
+  tj_mem_rd_mux #(.AW(AXI_AW)) u_mrd_mux (
+    .clk(maxi_clk), .rst_n(maxi_rstn),
+    .a_req_valid(mrd_req_valid), .a_req_ready(mrd_req_ready),
+    .a_req_addr(mrd_req_addr), .a_req_len(mrd_req_len),
+    .a_rsp_valid(mrd_rsp_valid), .a_rsp_ready(mrd_rsp_ready),
+    .b_req_valid(bfm_req_valid), .b_req_ready(bfm_req_ready),
+    .b_req_addr(bfm_req_addr), .b_req_len(bfm_req_len),
+    .b_rsp_valid(bfm_rsp_valid), .b_rsp_ready(bfm_rsp_ready),
+    .m_req_valid(mm_req_valid), .m_req_ready(mm_req_ready),
+    .m_req_addr(mm_req_addr), .m_req_len(mm_req_len),
+    .m_rsp_valid(mm_rsp_valid), .m_rsp_ready(mm_rsp_ready),
+    .m_rsp_data(mrd_rsp_data_bk), .m_rsp_last(mrd_rsp_last_bk), .m_rsp_err(mrd_rsp_err_bk),
+    .rsp_data(mux_rsp_data), .rsp_last(mux_rsp_last), .rsp_err(mux_rsp_err)
+  );
+  assign mrd_rsp_data = mux_rsp_data;
+  assign mrd_rsp_last = mux_rsp_last;
+  assign mrd_rsp_err  = mux_rsp_err;
+
   tj_axi_rd_backend #(
     .AW(AXI_AW), .AXI_AW(AXI_AW), .AXI_DW(AXI_DW), .AXI_IDW(AXI_IDW)
   ) u_axi_rd (
     .clk(maxi_clk), .rst_n(maxi_rstn),
-    .req_valid(mrd_req_valid), .req_ready(mrd_req_ready),
-    .req_addr(mrd_req_addr), .req_len(mrd_req_len),
-    .rsp_valid(mrd_rsp_valid), .rsp_ready(mrd_rsp_ready),
-    .rsp_data(mrd_rsp_data), .rsp_last(mrd_rsp_last), .rsp_err(mrd_rsp_err),
+    .req_valid(mm_req_valid), .req_ready(mm_req_ready),
+    .req_addr(mm_req_addr), .req_len(mm_req_len),
+    .rsp_valid(mm_rsp_valid), .rsp_ready(mm_rsp_ready),
+    .rsp_data(mrd_rsp_data_bk), .rsp_last(mrd_rsp_last_bk), .rsp_err(mrd_rsp_err_bk),
     .arvalid, .arready, .arid, .araddr, .arlen, .arsize, .arburst,
     .rvalid, .rready, .rdata, .rresp, .rlast, .rid
   );

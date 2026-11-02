@@ -31,6 +31,12 @@ module tb_tj_spi_status;
     .spi_rdata_o(spi_rdata), .spi_busy_o(spi_busy), .eng_busy_o(eng_busy),
     .spi_done_set_o(spi_done), .spi_err_set_o(spi_err),
     .spiwin_busy_o(spiwin_busy), .spiwin_err_set_o(spiwin_err),
+    // BOOT port is unused in this test.
+    .bt_cmd_valid(1'b0), .bt_cmd_ready(),
+    .bt_die(5'h0), .bt_kind(2'h0), .bt_addr(32'h0),
+    .bt_wdat_valid(1'b0), .bt_wdat_ready(), .bt_wdat(32'h0),
+    .bt_rdat_valid(), .bt_rdat_ready(1'b1), .bt_rdat(),
+    .bt_done(), .bt_err(),
     .win_psel(1'b0), .win_penable(1'b0), .win_pwrite(1'b0),
     .win_paddr(12'h0), .win_pwdata(32'h0),
     .win_pready(), .win_pslverr(), .win_prdata(),

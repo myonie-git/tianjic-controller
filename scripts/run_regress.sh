@@ -30,7 +30,7 @@ sim_passed() {
 rm -rf "$WORK"; mkdir -p "$WORK/gen" "$WORK/csr" "$WORK/spi" "$WORK/top" "$WORK/apb_smoke" "$WORK/sg"
 
 # CSR generated files.
-say "[1/11] 生成物防漂移门禁"
+say "[1/12] 生成物防漂移门禁"
 mkdir -p "$WORK/gen/rtl" "$WORK/gen/doc" "$WORK/gen/tb"
 ( cd "$TJ_CTRL_HOME/csr" && python3 gen_csr.py tj_ctrl_csr.yaml \
     --out-rtl "$WORK/gen/rtl" --out-doc "$WORK/gen/doc" --out-tb "$WORK/gen/tb" ) \
@@ -46,7 +46,7 @@ done
 [ $FAIL -eq 0 ] && say "    门禁通过:四件产物与真源逐字节一致"
 
 # CSR register test.
-say "[2/11] CSR 自测 TB"
+say "[2/12] CSR 自测 TB"
 if ( cd "$WORK/csr" && \
   vlogan -full64 -sverilog -nc -timescale=1ns/1ps \
     "$TJ_CTRL_HOME/rtl/csr/tj_ctrl_csr_pkg.sv" \
@@ -61,7 +61,7 @@ else
 fi
 
 # SPI tests across seeds.
-say "[3/11] SPI 陪练 TB × 种子集 [$SEEDS]"
+say "[3/12] SPI 陪练 TB × 种子集 [$SEEDS]"
 ( cd "$WORK/spi" && \
   vlogan -full64 -sverilog -nc -timescale=1ns/1ps \
     "$TJ_CTRL_HOME/rtl/pkg/tj_ctrl_pkg.sv" \
@@ -86,7 +86,7 @@ n_seed=$(echo $SEEDS | wc -w)
 [ "$n_pass" = "$n_seed" ] && say "    全种子($n_pass/$n_seed) $(grep -h 'SPI TB PASS' "$WORK"/spi/run_*.log | sort -u)"
 
 # Top-level elaboration.
-say "[4/11] 顶层弹性"
+say "[4/12] 顶层弹性"
 ( cd "$WORK/top" && \
   vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" && \
   vcs -full64 -nc tj_ctrl_top -o simv ) > "$WORK/top/run.log" 2>&1 \
@@ -94,9 +94,9 @@ say "[4/11] 顶层弹性"
 
 # Compile Controller and chip RTL together, then run the APB smoke test.
 if [ "${SKIP_APB_SMOKE:-0}" = "1" ]; then
-  say "[5/11] APB 共库冒烟:SKIP_APB_SMOKE=1 跳过"
+  say "[5/12] APB 共库冒烟:SKIP_APB_SMOKE=1 跳过"
 else
-  say "[5/11] APB 共库编译及APB冒烟"
+  say "[5/12] APB 共库编译及APB冒烟"
   # Match the native chip build's duplicate-module policy.
   if ( cd "$WORK/apb_smoke" && \
     vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" && \
@@ -113,9 +113,9 @@ fi
 
 # SpyGlass lint.
 if [ "${SKIP_SG:-0}" = "1" ] || ! command -v spyglass >/dev/null 2>&1; then
-  say "[6/11] SpyGlass lint:跳过(SKIP_SG=1 或未装)"
+  say "[6/12] SpyGlass lint:跳过(SKIP_SG=1 或未装)"
 else
-  say "[6/11] SpyGlass lint(goal lint/lint_rtl)"
+  say "[6/12] SpyGlass lint(goal lint/lint_rtl)"
   sed "s|\${TJ_CTRL_HOME}|$TJ_CTRL_HOME|g" "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
     > "$WORK/sg/expanded.f"
   cat > "$WORK/sg/tj.prj" <<EOF
@@ -160,7 +160,7 @@ EOF
 fi
 
 # Image exporter CLI and SV format checks.
-say "[7/11] 镜像工具与格式检查"
+say "[7/12] 镜像工具与格式检查"
 mkdir -p "$WORK/image"
 if PYTHONIOENCODING=utf-8 python3 "$TJ_CTRL_HOME/tb/sw/test_tj_image.py" \
   --tool "$TJ_CTRL_HOME/sw/tj_image.py" --work "$WORK/image/python" \
@@ -191,9 +191,9 @@ fi
 
 # Initialization command replay.
 if [ ! -d "$IMAGE_CASE" ]; then
-  say "[8/11] 初始化命令重放:测例目录不可达,跳过"
+  say "[8/12] 初始化命令重放:测例目录不可达,跳过"
 else
-  say "[8/11] 初始化命令重放(host→APB→SPIWIN→SPI→spi2ahb)"
+  say "[8/12] 初始化命令重放(host→APB→SPIWIN→SPI→spi2ahb)"
   mkdir -p "$WORK/init"
   if ( cd "$WORK/init" && \
     vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
@@ -211,11 +211,11 @@ fi
 # LVDS link test.
 echo
 if [ "${SKIP_LNK:-0}" = "1" ]; then
-  say "[9/11] LVDS 链路验收 TB:跳过(SKIP_LNK=1)"
+  say "[9/12] LVDS 链路验收 TB:跳过(SKIP_LNK=1)"
 elif [ ! -f "$YAWING_DESIGN/rtl/lvds_subsys/top/lvds_subsys.sv" ]; then
-  say "[9/11] LVDS 链路验收 TB:芯片 lvds 树不可达,跳过"
+  say "[9/12] LVDS 链路验收 TB:芯片 lvds 树不可达,跳过"
 else
-  say "[9/11] LVDS 链路验收 TB(链主机 + 两份芯片原版 lvds_subsys 对打,T1-T4)"
+  say "[9/12] LVDS 链路验收 TB(链主机 + 两份芯片原版 lvds_subsys 对打,T1-T4)"
   if sh "$TJ_CTRL_HOME/tb/lnk/run_lnk_tb.sh" "$WORK/lnk" > "$WORK/lnk_run.log" 2>&1; then
     say "    $(grep -E '(LNK|CFGCHAIN) TB PASS' "$WORK/lnk_run.log")"
   else
@@ -225,7 +225,7 @@ fi
 
 # SEND path test.
 echo
-say "[10/11] SEND 验收 TB(APB门铃→AXI取数→解析分发→缝TX,九相位;含 导出镜像重放)"
+say "[10/12] SEND 验收 TB(APB门铃→AXI取数→解析分发→缝TX,九相位;含 导出镜像重放)"
 mkdir -p "$WORK/send"
 IMG_ARG=""
 [ -f "$WORK/image/out/send_image.bin" ] && IMG_ARG="+IMG=$WORK/image/out/send_image.bin"
@@ -243,7 +243,7 @@ fi
 
 # RECV path test.
 echo
-say "[11/11] RECV 验收 TB(缝RX→环形写→host消费,九相位;含 SEND→RECV 环回)"
+say "[11/12] RECV 验收 TB(缝RX→环形写→host消费,九相位;含 SEND→RECV 环回)"
 mkdir -p "$WORK/recv"
 if ( cd "$WORK/recv" && \
   vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
@@ -254,6 +254,30 @@ if ( cd "$WORK/recv" && \
   say "    $(grep 'RECV TB PASS' "$WORK/recv/run.log")"
 else
   bad "RECV TB 未 PASS(见 $WORK/recv/run.log)"
+fi
+
+# BOOT data loading through SPI.
+boot_profile() {
+  if ( cd "$WORK/boot" && ./simv -nc "+TJ_PCLK_HP=$2" "+TJ_MAXI_HP=$3" ) \
+       > "$WORK/boot/$1" 2>&1 && sim_passed "$WORK/boot/$1" "BOOT TB"; then
+    say "    $1: $(grep '^BOOT TB PASS' "$WORK/boot/$1")"
+  else
+    bad "BOOT TB failed (see $WORK/boot/$1)"
+  fi
+}
+say "[12/12] BOOT 引擎测试"
+mkdir -p "$WORK/boot"
+if ( cd "$WORK/boot" && \
+  vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
+    "$YAWING_DESIGN/rtl/mcu_subsys/spi/spi2ahb.v" \
+    "$TJ_CTRL_HOME/tb/boot/tb_tj_boot.sv" && \
+  vcs -full64 -nc tb_tj_boot -o simv ) > "$WORK/boot/build.log" 2>&1 &&
+  log_clean "$WORK/boot/build.log"; then
+  boot_profile run.log          5.0   1.2
+  boot_profile run_delivery.log 2.0  10.0
+  boot_profile run_boundary.log 50.0  5.0
+else
+  bad "BOOT TB build failed (see $WORK/boot/build.log)"
 fi
 
 # Overall result.

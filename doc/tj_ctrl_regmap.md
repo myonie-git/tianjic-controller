@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 映射版本 | v0.1.0 |
-| 真源指纹 | md5=590448241144(gen_csr.py 自动生成,真源 `controller/csr/tj_ctrl_csr.yaml`,勿手改;同源再生成逐字节相同)|
+| 真源指纹 | md5=5d31148b60c1(gen_csr.py 自动生成,真源 `controller/csr/tj_ctrl_csr.yaml`,勿手改;同源再生成逐字节相同)|
 | 总线 | APB,32bit 数据,字节地址,窗口 64KB;零等待;未映射/预留地址返回 pslverr |
 | 约定 | W1C=硬件置位、写 1 清零(同拍冲突置位优先);脉冲=写 1 出单拍、读恒 0;写 RO 忽略不报错 |
 
@@ -34,7 +34,7 @@
 | 0x00 | ID | [31:0] | — | RO | 0x544A4331(常量) | 控制器标识 TJC1（ASCII）。 |
 | 0x04 | VERSION | [31:0] | — | RO | 0x100(常量) | 寄存器版本：[23:16]主版本，[15:8]次版本，[7:0]补丁版本。 |
 | 0x08 | SCRATCH | [31:0] | — | RW | 0x0 | APB 读写自检，无控制副作用。 |
-| 0x0C | CTRL | [0] | SRST | 脉冲 | — | 引擎软复位控制。<br>写1发起引擎软复位请求，读回0；不清除CSR配置。SEND停止新AXI请求和记录装填，等待在途AXI及已挂出的LVDS包收尾后归闲；中止本身不置DONE/ERR，已交付包仍计SENT并按记录IRQ标志通知；RECV清空尚未提交的通道缓冲，等待在途B响应后恢复，保留WPTR/RPTR；已使能通道在中止及排空期间按OVF_POLICY反压或丢弃并置OVF。 |
+| 0x0C | CTRL | [0] | SRST | 脉冲 | — | 引擎软复位控制。<br>写1发起引擎软复位请求，读回0；不清除CSR配置。SEND停止新AXI请求和记录装填，等待在途AXI及已挂出的LVDS包收尾后归闲；中止本身不置DONE/ERR，已交付包仍计SENT并按记录IRQ标志通知；RECV清空尚未提交的通道缓冲，等待在途B响应后恢复，保留WPTR/RPTR；已使能通道在中止及排空期间按OVF_POLICY反压或丢弃并置OVF。BOOT接收事务边界中止请求，BOOT_PRIM中止时尝试写回CLK_SHIFT=0，处理中止不置DONE；SPI和配置链不接入此请求。 |
 | 0x10 | STA | [7:0] | SPI_BUSY | RO | — | SPI/BOOT/SEND/CC 忙状态汇总。<br>各SPI引擎实际占用状态，含SPIWIN访问；门铃事务状态见各组SPI.STA.BUSY。 |
 |  |  | [8] | BOOT_BUSY | RO | — | BOOT 引擎忙。 |
 |  |  | [9] | SEND_BUSY | RO | — | SEND整体忙状态，包含取数、分发及事件送达等待。 |
@@ -94,15 +94,15 @@ SPI组控制与状态；逻辑接口为组内4个die共用SCLK/MOSI、独立CS/M
 |---|---|---|---|---|---|---|
 | 0x00 | CMD | [1:0] | KIND | RW | 0x0 | 操作命令<br>0=FW_LOAD(DDR→ILM/DLM,WR16 流)1=BOOT_PRIM(DDR 模板→core cfg 窗口,引擎带 CLK_SHIFT 序列);2 保留(v2:MBOX_POLL) |
 |  |  | [8:4] | DIE | RW | 0x0 | 目标 die 全局编号 0~31(多 die 由 host 循环敲门) |
-| 0x04 | SRC_LO | [31:0] | — | RW | 0x0 | DDR 源地址 [31:0],64B 对齐(BOOT_PRIM 时指向 2 行引导原语模板,模板由驱动预置于 DDR) |
+| 0x04 | SRC_LO | [31:0] | — | RW | 0x0 | DDR 源地址低 32 位。源地址须按 64 字节对齐。BOOT_PRIM 模板由驱动预置于 DDR，长度由 BOOT.LEN 指定。 |
 | 0x08 | SRC_HI | [15:0] | — | RW | 0x0 | DDR 源地址 [47:32] |
-| 0x0C | LEN | [31:0] | — | RW | 0x0 | 长度(字节,64 的倍数);BOOT_PRIM 时=引导链行数×32B(1~4 条 Recv+Stop,可变长——普通核 2 行、LVDS 入口核 3 行,模板由驱动置于 DDR) |
-| 0x10 | DST | [31:0] | — | RW | 0x0 | 芯片侧目标基址:FW_LOAD=ILM/DLM 地址;BOOT_PRIM=目标 core cfg 基址 |
-| 0x14 | DB | [0] | GO | 脉冲 | — | 门铃<br>写 1 发起 |
+| 0x0C | LEN | [31:0] | — | RW | 0x0 | 装载长度，单位为字节，必须大于 0。FW_LOAD 长度须为 64 的倍数。BOOT_PRIM 长度可取 32、64、96 或 128 字节。非法长度返回 ERR_CODE=3。 |
+| 0x10 | DST | [31:0] | — | RW | 0x0 | 芯片侧目标地址。FW_LOAD用于ILM/DLM，须64字节对齐，末字节不得超过0xFFFFFFFF。BOOT_PRIM须32字节对齐，整段须位于核内存0x02000000至0x0207FFFF。软件须在GO前完成芯片侧配置与选核，CLK_SHIFT由引擎控制。 |
+| 0x14 | DB | [0] | GO | 脉冲 | — | 门铃<br>写1发起；BUSY=1时忽略。 |
 | 0x18 | STA | [0] | BUSY | RO | — | 状态<br>进行中 |
 |  |  | [8] | DONE | W1C | 0x0 | 完成 |
 |  |  | [9] | ERR | W1C | 0x0 | 出错(见 ERR_CODE) |
-|  |  | [15:12] | ERR_CODE | RO | — | 1=SPI 超时 2=AXI 读错 3=长度非法 其余保留 |
+|  |  | [15:12] | ERR_CODE | RO | — | 1=SPI超时，2=AXI读错，3=KIND、LEN或DST非法。其余编码保留。 |
 
 ## SEND(基址 0x0C00)
 

@@ -93,6 +93,12 @@ module tb_tj_spi;
     .spi_rdata_o(s_rdata), .spi_busy_o(s_busy),
     .spi_done_set_o(s_done), .spi_err_set_o(s_err),
     .spiwin_busy_o(sw_busy), .spiwin_err_set_o(sw_err),
+    // BOOT port is unused in this test.
+    .bt_cmd_valid(1'b0), .bt_cmd_ready(),
+    .bt_die(5'h0), .bt_kind(2'h0), .bt_addr(32'h0),
+    .bt_wdat_valid(1'b0), .bt_wdat_ready(), .bt_wdat(32'h0),
+    .bt_rdat_valid(), .bt_rdat_ready(1'b1), .bt_rdat(),
+    .bt_done(), .bt_err(),
     .win_psel(wp_sel), .win_penable(wp_en), .win_pwrite(wp_wr),
     .win_paddr(wp_addr), .win_pwdata(wp_wdata),
     .win_pready(wp_rdy), .win_pslverr(wp_slv), .win_prdata(wp_rdata),

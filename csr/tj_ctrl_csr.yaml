@@ -52,7 +52,7 @@ blocks:
           - name: SRST
             bits: 0
             kind: PULSE
-            desc: "写1发起引擎软复位请求，读回0；不清除CSR配置。SEND停止新AXI请求和记录装填，等待在途AXI及已挂出的LVDS包收尾后归闲；中止本身不置DONE/ERR，已交付包仍计SENT并按记录IRQ标志通知；RECV清空尚未提交的通道缓冲，等待在途B响应后恢复，保留WPTR/RPTR；已使能通道在中止及排空期间按OVF_POLICY反压或丢弃并置OVF。"
+            desc: "写1发起引擎软复位请求，读回0；不清除CSR配置。SEND停止新AXI请求和记录装填，等待在途AXI及已挂出的LVDS包收尾后归闲；中止本身不置DONE/ERR，已交付包仍计SENT并按记录IRQ标志通知；RECV清空尚未提交的通道缓冲，等待在途B响应后恢复，保留WPTR/RPTR；已使能通道在中止及排空期间按OVF_POLICY反压或丢弃并置OVF。BOOT接收事务边界中止请求，BOOT_PRIM中止时尝试写回CLK_SHIFT=0，处理中止不置DONE；SPI和配置链不接入此请求。"
 
       - name: STA
         offset: 0x10
@@ -261,7 +261,7 @@ blocks:
       - name: SRC_LO
         offset: 0x04
         kind: RW
-        desc: "DDR 源地址 [31:0],64B 对齐(BOOT_PRIM 时指向 2 行引导原语模板,模板由驱动预置于 DDR)"
+        desc: "DDR 源地址低 32 位。源地址须按 64 字节对齐。BOOT_PRIM 模板由驱动预置于 DDR，长度由 BOOT.LEN 指定。"
 
       - name: SRC_HI
         offset: 0x08
@@ -272,12 +272,12 @@ blocks:
       - name: LEN
         offset: 0x0C
         kind: RW
-        desc: "长度(字节,64 的倍数);BOOT_PRIM 时=引导链行数×32B(1~4 条 Recv+Stop,可变长——普通核 2 行、LVDS 入口核 3 行,模板由驱动置于 DDR)"
+        desc: "装载长度，单位为字节，必须大于 0。FW_LOAD 长度须为 64 的倍数。BOOT_PRIM 长度可取 32、64、96 或 128 字节。非法长度返回 ERR_CODE=3。"
 
       - name: DST
         offset: 0x10
         kind: RW
-        desc: "芯片侧目标基址:FW_LOAD=ILM/DLM 地址;BOOT_PRIM=目标 core cfg 基址"
+        desc: "芯片侧目标地址。FW_LOAD用于ILM/DLM，须64字节对齐，末字节不得超过0xFFFFFFFF。BOOT_PRIM须32字节对齐，整段须位于核内存0x02000000至0x0207FFFF。软件须在GO前完成芯片侧配置与选核，CLK_SHIFT由引擎控制。"
 
       - name: DB
         offset: 0x14
@@ -286,7 +286,7 @@ blocks:
           - name: GO
             bits: 0
             kind: PULSE
-            desc: "写 1 发起"
+            desc: "写1发起；BUSY=1时忽略。"
 
       - name: STA
         offset: 0x18
@@ -310,7 +310,7 @@ blocks:
           - name: ERR_CODE
             bits: "15:12"
             kind: RO
-            desc: "1=SPI 超时 2=AXI 读错 3=长度非法 其余保留"
+            desc: "1=SPI超时，2=AXI读错，3=KIND、LEN或DST非法。其余编码保留。"
 
   # DDR-to-LVDS record transfer.
   - name: SEND
