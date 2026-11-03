@@ -1,7 +1,7 @@
 // File        : tb_tj_ctrl_chip.sv
 // Module      : tb_tj_ctrl_chip
 // Description : Controller integration testbench for the native chip simulation.
-//               Uses SPI control and optional LVDS traffic; core images load via backdoor.
+//               Loads core templates through native memory hooks or BOOT SPI.
 //               Enable with +use_tj_ctrl and select the image tool with +TJ_PY.
 `include "tb.define.v"
 
@@ -28,7 +28,7 @@ module tb_tj_ctrl_chip;
   logic pready, pslverr;
   logic [7:0] sclk_w, mosi_w;
   logic [31:0] cs_w, miso_w;
-  // AXI reads for SEND and writes for RECV.
+  // AXI reads for SEND and BOOT, and writes for RECV.
   logic        arvalid_w, arready_w, rvalid_w, rready_w, rlast_w;
   logic [3:0]  arid_w, rid_w;
   logic [47:0] araddr_w;
@@ -406,7 +406,109 @@ module tb_tj_ctrl_chip;
     end
   endtask
 
-  // Strip command comments while preserving the W/P/F operand text.
+  localparam longint unsigned BOOT_STAGE = 64'h0000_5000_0000;
+  localparam logic [31:0] CORE_LS_ADDR =
+      tj_ctrl_pkg::CHIP_CORE_REG_BASE + 32'(tj_ctrl_pkg::CORE_REG_LS);
+  typedef struct { int y, x, boot_bytes; } core_t;
+  core_t cores[$];
+  int unsigned boot_verified_cores = 0;
+  string case_p, tj_py;
+
+  // Stage 1 to 4 consecutive 32-byte rows starting at row 0.
+  task automatic boot_stage_core(input int idx, input string path, output int bytes);
+    int fd, rows, fields;
+    string line, tag, expected_tag, extra;
+    logic [255:0] row_data;
+    longint unsigned beat_addr;
+    fd = $fopen(path, "r");
+    if (fd == 0) $fatal(1, "cannot open %s", path);
+    rows = 0;
+    beat_addr = (BOOT_STAGE >> 4) + longint'(idx) * 16;
+    while ($fgets(line, fd)) begin
+      fields = $sscanf(line, "%s %h %s", tag, row_data, extra);
+      if (fields <= 0) continue;
+      if (fields != 2 || $isunknown(row_data))
+        $fatal(1, "%s: expected @row and hexadecimal BOOT data", path);
+      if (rows == 4) $fatal(1, "%s: BOOT templates support at most 4 rows", path);
+      // Match the next row, allowing zero-padded tags such as @0001.
+      expected_tag = "@";
+      for (int i = 2; i < tag.len(); i++) expected_tag = {expected_tag, "0"};
+      expected_tag = {expected_tag, $sformatf("%0d", rows)};
+      if (tag != expected_tag)
+        $fatal(1, "%s: expected BOOT row @%0h, got %s", path, rows, tag);
+      ddr[beat_addr + 2 * rows]     = row_data[127:0];
+      ddr[beat_addr + 2 * rows + 1] = row_data[255:128];
+      rows++;
+    end
+    $fclose(fd);
+    if (rows == 0) $fatal(1, "%s: empty BOOT template", path);
+    bytes = rows * 32;
+  endtask
+
+  task automatic set_core_ls(input logic [31:0] value);
+    logic [31:0] actual;
+    win_access(1'b1, CORE_LS_ADDR, value);
+    core_read(CORE_LS_ADDR, actual);
+    chk(actual[1:0] === value[1:0],
+        $sformatf("LS_CONTROL wrote %h, read %h", value, actual));
+  endtask
+
+  task automatic boot_deliver_cores();
+    logic [31:0] status;
+    foreach (cores[i]) begin
+      logic [31:0] saved_ls;
+      string golden, dump_path;
+      int unsigned errs_before;
+
+      errs_before = errs;
+      status = 32'h1;
+      win_access(1'b1, 32'h02FFF000, status);
+      status = (cores[i].y << 2) | cores[i].x;
+      win_access(1'b1, 32'h02FFF00C, status);
+      core_read(CORE_LS_ADDR, saved_ls);
+      if (errs != errs_before || $isunknown(saved_ls[1:0]))
+        $fatal(1, "Cannot read LS_CONTROL for core (%0d,%0d)", cores[i].y, cores[i].x);
+
+      set_core_ls(saved_ls & ~32'h3);
+      if (errs != errs_before) begin
+        set_core_ls(saved_ls);
+        $fatal(1, "Cannot wake core (%0d,%0d)", cores[i].y, cores[i].x);
+      end
+
+      apb_wr(16'h0800, 32'h1);  // BOOT_PRIM, die 0.
+      apb_wr(16'h0804, BOOT_STAGE[31:0] + i * 32'h100);
+      apb_wr(16'h0808, {16'h0, BOOT_STAGE[47:32]});
+      apb_wr(16'h080C, cores[i].boot_bytes);
+      apb_wr(16'h0810, tj_ctrl_pkg::CHIP_CORE_MEM_BASE);
+      apb_wr(16'h0814, 32'h1);
+      status = 0;
+      for (int t = 0; t < 20000 && !status[8]; t++) apb_rd(16'h0818, status);
+      chk(status[8], $sformatf("BOOT did not finish for core (%0d,%0d)", cores[i].y, cores[i].x));
+      chk(!status[9], $sformatf("BOOT error %0d for core (%0d,%0d)",
+                                status[15:12], cores[i].y, cores[i].x));
+      apb_wr(16'h0818, 32'h300);
+      golden = $sformatf("%s/%0d_%0d_mem_config.txt", case_p, cores[i].y, cores[i].x);
+      dump_path = $sformatf("bootchk_%0d_%0d.txt", cores[i].y, cores[i].x);
+      core_mem_dump(cores[i].y, cores[i].x, golden, dump_path);
+      chk($system($sformatf("env PYTHONIOENCODING=utf-8 python3 \"%s\" compare \"%s\" \"%s\" --mode memory",
+                            tj_py, golden, dump_path)) == 0,
+          $sformatf("BOOT memory readback for core (%0d,%0d)", cores[i].y, cores[i].x));
+
+      set_core_ls(saved_ls);
+      if (errs != errs_before)
+        $fatal(1, "BOOT load failed for core (%0d,%0d)", cores[i].y, cores[i].x);
+      boot_verified_cores++;
+    end
+    if ($test$plusargs("TJ_BOOTPROBE")) begin
+      chk(boot_verified_cores == cores.size(),
+          "All BOOT cores passed memory readback");
+      if (errs == 0 && checks > 0) $display("CTRL CHIP TB PASS (%0d checks)", checks);
+      else $fatal(1, "CTRL CHIP TB FAIL (%0d/%0d)", errs, checks);
+      $finish;
+    end
+  endtask
+
+  // Strip comments before parsing command operands.
   function automatic string command_text(input string line);
     for (int i = 0; i < line.len(); i++) begin
       if (line.getc(i) == 8'h23) begin
@@ -447,6 +549,11 @@ module tb_tj_ctrl_chip;
               $sformatf("Poll %08h: %08h & %08h != %08h", a_v, rdat, m_v, v_v));
           n_p++;
         end
+        "B": begin
+          code = $sscanf(line, "%s %h %h %s", op, a_v, d_v, extra);
+          if (code != 3) $fatal(1, "%s:%0d: expected B argument argument", path, line_no);
+          if ($test$plusargs("TJ_BOOTSPI")) boot_deliver_cores();
+        end
         "F": begin
           code = $sscanf(line, "%s %h %h %s", op, a_v, d_v, extra);
           if (code != 3) $fatal(1, "%s:%0d: expected F argument argument", path, line_no);
@@ -484,10 +591,7 @@ module tb_tj_ctrl_chip;
   endtask
 
   // Main sequence.
-  string regs_p, memcfg_p, golden_p, out_p, case_p, img_p, line;
-  string tj_py;
-  typedef struct { int y, x; } core_t;
-  core_t cores[$];
+  string regs_p, memcfg_p, golden_p, out_p, img_p, line;
   int comparisons = 0;
   int fd, code, gy, gx, n_rec;
   logic [31:0] rdat, d_v;
@@ -533,7 +637,7 @@ module tb_tj_ctrl_chip;
     $display("CTRL CHIP TB: Chip reset released @%0t", $time);
     repeat (200) @(posedge pclk);
 
-    // Load each listed core through the native chip memory hooks.
+    // Stage BOOT images in DDR or load core memory directly.
     if ($value$plusargs("TJ_CASE=%s", case_p)) begin
       fd = $fopen({case_p, "/core_list.txt"}, "r");
       if (fd == 0) $fatal(1, "cannot open core_list");
@@ -544,12 +648,18 @@ module tb_tj_ctrl_chip;
         code = $sscanf(line, "%d %d %s", core.y, core.x, extra);
         if (code != 2 || core.y < 0 || core.y > 3 || core.x < 0 || core.x > 3)
           $fatal(1, "Invalid core_list row: %s", line);
+        if ($test$plusargs("TJ_BOOTSPI"))
+          boot_stage_core(cores.size(), $sformatf("%s/%0d_%0d_mem_config.txt", case_p, core.y, core.x),
+                          core.boot_bytes);
+        else
+          core_mem_init(core.y, core.x,
+                        $sformatf("%s/%0d_%0d_mem_config.txt", case_p, core.y, core.x));
         cores.push_back(core);
-        core_mem_init(core.y, core.x,
-                      $sformatf("%s/%0d_%0d_mem_config.txt", case_p, core.y, core.x));
       end
       $fclose(fd);
       if (cores.size() == 0) $fatal(1, "core_list contains no cores");
+    end else if ($test$plusargs("TJ_BOOTSPI")) begin
+      $fatal(1, "BOOT-SPI requires +TJ_CASE");
     end
     if (lvds_mode) begin
       if (case_p == "") $fatal(1, "need +TJ_CASE=");
@@ -734,6 +844,10 @@ module tb_tj_ctrl_chip;
       chk(rdat === 32'h0, $sformatf("Link ERR_ST after W1C=%08x, expected zero", rdat));
       $display("CTRL CHIP TB: Link error injection and clearing complete");
     end
+
+    if ($test$plusargs("TJ_BOOTSPI"))
+      chk(boot_verified_cores == cores.size(),
+          "All BOOT cores passed memory readback");
 
     if (errs == 0 && checks > 0) $display("CTRL CHIP TB PASS (%0d checks)", checks);
     else $fatal(1, "CTRL CHIP TB FAIL (%0d/%0d)", errs, checks);

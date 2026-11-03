@@ -1,7 +1,7 @@
 // File        : tb_tj_init_replay.sv
 // Module      : tb_tj_init_replay
 // Description : Replay W/P commands through APB, SPIWIN and the chip SPI-to-AHB bridge.
-//               Check observed AHB transactions. Skip F markers; the model supplies IDLE=1.
+//               Check observed AHB transactions. Skip B/F markers; the model supplies IDLE=1.
 // Usage       : +REGS=<init_regs.txt>
 module tb_tj_init_replay;
   timeunit 1ns;
@@ -224,10 +224,10 @@ module tb_tj_init_replay;
                         a_v, poll_i, rdat, m_v, v_v));
           n_p++;
         end
-        "F": begin
+        "B", "F": begin
           code = $sscanf(line, "%s %h %h %s", op, a_v, d_v, extra);
-          if (code != 3) $fatal(1, "%s:%0d: expected F argument argument", regs_p, line_no);
-          n_f++;
+          if (code != 3) $fatal(1, "%s:%0d: expected %s argument argument", regs_p, line_no, op);
+          if (op == "F") n_f++;
         end
         default: $fatal(1, "%s:%0d: unsupported command %s", regs_p, line_no, op);
       endcase

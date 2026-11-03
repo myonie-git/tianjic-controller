@@ -4,10 +4,15 @@
 # TJ_REPO selects the chip environment; TJ_CTRL_HOME selects Controller sources and tools.
 # Jobs default to tjctrl_<pid>; use different JOBNAME values for concurrent runs.
 # Cases with lvds_config.txt use LVDS; others use SPI and backdoor memory loading.
+# BOOTSPI=1 selects BOOT loading in LVDS cases.
 # LVDS_EXTRA_TESTS=1 enables dx=-32 and link-error tests in LVDS mode.
 set -u
 CASE=${1:-/data_8T_2/Tianjic/all_cases/core_array/ann_sparse}
 CASE=$(cd "$CASE" && pwd) || exit 1
+if [ "${BOOTSPI:-0}" = "1" ] && [ ! -f "$CASE/lvds_config.txt" ]; then
+  echo "BOOTSPI=1 requires a supported LVDS case" >&2
+  exit 1
+fi
 HERE=$(cd "$(dirname "$0")" && pwd) || exit 1
 ENTRY_REPO=$(dirname "$(dirname "$HERE")")
 REPO=${TJ_REPO:-$ENTRY_REPO}
@@ -50,6 +55,7 @@ rm -f "$RUN/dielevel.log" || exit 1
 cd "$RUN" || exit 1
 SPECIAL_ARGS=""
 [ "${LVDS_EXTRA_TESTS:-0}" = "1" ] && SPECIAL_ARGS="+TJ_ECCTEST +TJ_DXTEST"
+[ "${BOOTSPI:-0}" = "1" ] && SPECIAL_ARGS="$SPECIAL_ARGS +TJ_BOOTSPI"
 if [ -f "$CASE/lvds_config.txt" ]; then
   # LVDS output is compared as a complete packet stream.
   NOUT=$(grep -c '^@' "$CASE/lvds_golden.txt") || exit 1

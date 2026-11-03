@@ -11,7 +11,7 @@ Outputs:
   send_image.bin: 16-byte little-endian SEND records.
   boot_prim_*.bin: 32-byte little-endian core memory rows.
   manifest.json: image files, core coordinates and row-address segments.
-  init_regs.txt: W/P/F initialization recipe for the caller to execute.
+  init_regs.txt: W/P/B/F initialization recipe for the caller to execute.
 
 Records: tag[127:112], flags[111:104], ch[103:96], pkt[95:0].
 TX flags: LAST bit0, FENCE bit1 (wait for prior TX handshakes), IRQ bit2.
@@ -166,13 +166,16 @@ def do_export(case_dir, outdir, ch=0, irq_last=False):
             if not m:
                 continue
             y, x = int(m.group(1)), int(m.group(2))
-            lines = parse_at_file(os.path.join(droot, fn))
+            rows = parse_at_pairs(os.path.join(droot, fn))
+            lines = dict(rows)
             addrs = sorted(lines)
             blob_name = 'boot_prim_%s_%d_%d.bin' % (die_name, y, x)
             with open(os.path.join(outdir, blob_name), 'wb') as f:
                 for a in addrs:
                     f.write(lines[a].to_bytes(32, 'little'))
             contiguous_head = addrs == list(range(len(addrs)))
+            boot_chain = 1 <= len(rows) <= 4 and all(
+                address == index for index, (address, _) in enumerate(rows))
             # Each segment describes destination rows for the next part of the blob.
             segments = []
             for a in addrs:
@@ -184,8 +187,7 @@ def do_export(case_dir, outdir, ch=0, irq_last=False):
                 'die': die_name, 'core_y': y, 'core_x': x,
                 'file': blob_name, 'lines': len(lines),
                 'start_line': addrs[0] if addrs else 0,
-                'kind': ('boot_chain' if len(lines) <= 5 and contiguous_head
-                         else 'full_image'),
+                'kind': 'boot_chain' if boot_chain else 'full_image',
                 'line_addrs_contiguous': contiguous_head,
                 'segments': segments,
             })
@@ -207,10 +209,10 @@ def do_export(case_dir, outdir, ch=0, irq_last=False):
                 cfg = parse_at_file(ctrl).get(0x80008, 0x4) if os.path.isfile(ctrl) else 0x4
                 core_config[key] = cfg & ~0x1
     with io.open(os.path.join(outdir, 'init_regs.txt'), 'w', encoding='utf-8') as f:
-        f.write('# SPI recipe: W address data; P address mask value; F marks a SEND transfer.\n')
+        f.write('# SPI recipe: W address data; P address mask value; B marks BOOT loading; F marks a SEND transfer.\n')
         for op, a, v, cmt in INIT_RECIPE:
             f.write('%s %08X %08X  # %s\n' % (op, a, v, cmt))
-        f.write('# Core image loading is external; see manifest.json.\n')
+        f.write('B 00000000 00000000  # Load core templates via BOOT when enabled.\n')
         for die_name, y, x in cores:
             f.write('W 02FFF00C %08X  # Select core %s (%d,%d).\n' % ((y << 2) | x, die_name, y, x))
             # Pulse config_en; preserve the other CONFIG bits.

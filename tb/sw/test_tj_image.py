@@ -115,6 +115,21 @@ class ImageTests(unittest.TestCase):
         self.assertEqual(core['kind'], 'boot_chain')
         self.assertEqual((out / core['file']).read_bytes(), first + second)
 
+    def test_boot_template_range(self):
+        self.write('case/core_list.txt', '0 0\n')
+        layouts = [
+            ([0], 'boot_chain'), ([0, 1, 2, 3], 'boot_chain'),
+            ([], 'full_image'), ([0, 1, 2, 3, 4], 'full_image'),
+            ([1], 'full_image'), ([0, 2], 'full_image'),
+            ([1, 0], 'full_image'), ([0, 0], 'full_image'),
+        ]
+        for addresses, kind in layouts:
+            with self.subTest(addresses=addresses):
+                text = ''.join('@{:x} 11\n'.format(a) for a in addresses)
+                self.write('case/0_0_mem_config.txt', text)
+                _, manifest = self.export()
+                self.assertEqual(manifest['cores'][0]['kind'], kind)
+
     def test_sparse_layout(self):
         self.write('case/core_list.txt', '0 0\n')
         self.write('case/0_0_mem_config.txt', '@9 dd\n@0 aa\n@4 cc\n@3 bb\n')

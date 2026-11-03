@@ -23,7 +23,7 @@ python3 controller/sw/tj_image.py selftest /path/to/case -o /path/to/selftest_ou
 | `send_image.bin` | 16字节小端 SEND 记录流；用例包含 `lvds_config.txt` 时生成 |
 | `boot_prim_*.bin` | 各核内存镜像，每行32字节、小端编码 |
 | `manifest.json` | 镜像文件、die及核坐标、行数和地址段 |
-| `init_regs.txt` | 初始化配方：`W` 写寄存器，`P` 轮询寄存器，`F` 标记 SEND 投递位置 |
+| `init_regs.txt` | 初始化配方：`W` 写寄存器，`P` 轮询寄存器，`B` 标记 BOOT 装载位置，`F` 标记 SEND 投递位置 |
 
 文件装载、寄存器访问和任务启动由 Host 软件或仿真环境执行。
 当前初始化配方不包含目标 die 切换指令。
@@ -39,6 +39,10 @@ python3 controller/sw/tj_image.py selftest /path/to/case -o /path/to/selftest_ou
 比较一致时退出码为0，不一致时为1。
 
 ## 核镜像布局与初始化
+
+BOOT-SPI 每核只装载 1～4 行，每行 32 字节。源文件须按 `@0` 起连续排列，
+符合时 `manifest.json` 将其标为 `boot_chain`。其它布局按 `full_image` 导出。
+在芯片测例中选择 BOOT-SPI 装载这类镜像会报错。
 
 核内存镜像按目标行地址升序排列。同一地址在源文件中出现多次时，使用最后一个值。
 `manifest.json` 中每个核的 `segments` 描述地址段，每项为 `[起始行, 行数]`，例如：
