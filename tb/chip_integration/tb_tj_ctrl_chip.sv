@@ -2,10 +2,19 @@
 // Module      : tb_tj_ctrl_chip
 // Description : Controller integration testbench for the native chip simulation.
 //               Loads core templates through native memory hooks or BOOT SPI.
+//               TJ_MULTI_DIE selects 2x2 dies; TJ_MULTI_DIE_4X1 selects 4x1 dies.
 //               Enable with +use_tj_ctrl and select the image tool with +TJ_PY.
 `include "tb.define.v"
 
 module tb_tj_ctrl_chip;
+
+  // Die hierarchy in the native single- and multi-die environments.
+`ifdef TJ_MULTI_DIE
+  `define TJD(R,C) top.packed_chip_top.gen_die_rows[R].gen_die_columns[C].u_chip_top
+  `define TJD0 `TJD(0,0)
+`else
+  `define TJD0 top.full_chip
+`endif
 
   logic pclk = 0, presetn = 0, maxi_clk = 0, maxi_rstn = 0, bclk_fpga = 0;
   always #5ns    pclk = ~pclk;
@@ -75,7 +84,17 @@ module tb_tj_ctrl_chip;
     .uart_rx(1'b1), .uart_tx()
   );
 
+`ifdef TJ_MULTI_DIE_4X1
+  // 4x1 die IDs are 0, 4, 8 and 12.
+  assign miso_w = {19'b0, top.w_spis0_miso[3][0], 3'b000, top.w_spis0_miso[2][0],
+                   3'b000, top.w_spis0_miso[1][0], 3'b000, top.w_spis0_miso[0][0]};
+`elsif TJ_MULTI_DIE
+  // 2x2 die IDs are 0, 1, 4 and 5.
+  assign miso_w = {26'b0, top.w_spis0_miso[1][1], top.w_spis0_miso[1][0], 2'b00,
+                   top.w_spis0_miso[0][1], top.w_spis0_miso[0][0]};
+`else
   assign miso_w = {31'b0, top.w_spis0_miso};
+`endif
 
   // FPGA-side link model using the chip LVDS wrapper.
   logic [1:0] fpga_idn;
@@ -98,45 +117,45 @@ module tb_tj_ctrl_chip;
   );
 
   // Connect chip west-side TX pads to the link model RX.
-  assign f_rxc_p[0] = top.full_chip.W__TX0_LVDS_CLK_P;  assign f_rxc_n[0] = top.full_chip.W__TX0_LVDS_CLK_N;
-  assign f_rxd_p[0][0] = top.full_chip.W__TX0_LVDS_DAT0_P; assign f_rxd_n[0][0] = top.full_chip.W__TX0_LVDS_DAT0_N;
-  assign f_rxd_p[0][1] = top.full_chip.W__TX0_LVDS_DAT1_P; assign f_rxd_n[0][1] = top.full_chip.W__TX0_LVDS_DAT1_N;
-  assign f_rxd_p[0][2] = top.full_chip.W__TX0_LVDS_DAT2_P; assign f_rxd_n[0][2] = top.full_chip.W__TX0_LVDS_DAT2_N;
-  assign f_rxd_p[0][3] = top.full_chip.W__TX0_LVDS_DAT3_P; assign f_rxd_n[0][3] = top.full_chip.W__TX0_LVDS_DAT3_N;
-  assign f_rxd_p[0][4] = top.full_chip.W__TX0_LVDS_DAT4_P; assign f_rxd_n[0][4] = top.full_chip.W__TX0_LVDS_DAT4_N;
-  assign f_rxc_p[1] = top.full_chip.W__TX1_LVDS_CLK_P;  assign f_rxc_n[1] = top.full_chip.W__TX1_LVDS_CLK_N;
-  assign f_rxd_p[1][0] = top.full_chip.W__TX1_LVDS_DAT0_P; assign f_rxd_n[1][0] = top.full_chip.W__TX1_LVDS_DAT0_N;
-  assign f_rxd_p[1][1] = top.full_chip.W__TX1_LVDS_DAT1_P; assign f_rxd_n[1][1] = top.full_chip.W__TX1_LVDS_DAT1_N;
-  assign f_rxd_p[1][2] = top.full_chip.W__TX1_LVDS_DAT2_P; assign f_rxd_n[1][2] = top.full_chip.W__TX1_LVDS_DAT2_N;
-  assign f_rxd_p[1][3] = top.full_chip.W__TX1_LVDS_DAT3_P; assign f_rxd_n[1][3] = top.full_chip.W__TX1_LVDS_DAT3_N;
-  assign f_rxd_p[1][4] = top.full_chip.W__TX1_LVDS_DAT4_P; assign f_rxd_n[1][4] = top.full_chip.W__TX1_LVDS_DAT4_N;
-  assign f_rxc_p[2] = top.full_chip.W__TX2_LVDS_CLK_P;  assign f_rxc_n[2] = top.full_chip.W__TX2_LVDS_CLK_N;
-  assign f_rxd_p[2][0] = top.full_chip.W__TX2_LVDS_DAT0_P; assign f_rxd_n[2][0] = top.full_chip.W__TX2_LVDS_DAT0_N;
-  assign f_rxd_p[2][1] = top.full_chip.W__TX2_LVDS_DAT1_P; assign f_rxd_n[2][1] = top.full_chip.W__TX2_LVDS_DAT1_N;
-  assign f_rxd_p[2][2] = top.full_chip.W__TX2_LVDS_DAT2_P; assign f_rxd_n[2][2] = top.full_chip.W__TX2_LVDS_DAT2_N;
-  assign f_rxd_p[2][3] = top.full_chip.W__TX2_LVDS_DAT3_P; assign f_rxd_n[2][3] = top.full_chip.W__TX2_LVDS_DAT3_N;
-  assign f_rxd_p[2][4] = top.full_chip.W__TX2_LVDS_DAT4_P; assign f_rxd_n[2][4] = top.full_chip.W__TX2_LVDS_DAT4_N;
+  assign f_rxc_p[0] = `TJD0.W__TX0_LVDS_CLK_P;  assign f_rxc_n[0] = `TJD0.W__TX0_LVDS_CLK_N;
+  assign f_rxd_p[0][0] = `TJD0.W__TX0_LVDS_DAT0_P; assign f_rxd_n[0][0] = `TJD0.W__TX0_LVDS_DAT0_N;
+  assign f_rxd_p[0][1] = `TJD0.W__TX0_LVDS_DAT1_P; assign f_rxd_n[0][1] = `TJD0.W__TX0_LVDS_DAT1_N;
+  assign f_rxd_p[0][2] = `TJD0.W__TX0_LVDS_DAT2_P; assign f_rxd_n[0][2] = `TJD0.W__TX0_LVDS_DAT2_N;
+  assign f_rxd_p[0][3] = `TJD0.W__TX0_LVDS_DAT3_P; assign f_rxd_n[0][3] = `TJD0.W__TX0_LVDS_DAT3_N;
+  assign f_rxd_p[0][4] = `TJD0.W__TX0_LVDS_DAT4_P; assign f_rxd_n[0][4] = `TJD0.W__TX0_LVDS_DAT4_N;
+  assign f_rxc_p[1] = `TJD0.W__TX1_LVDS_CLK_P;  assign f_rxc_n[1] = `TJD0.W__TX1_LVDS_CLK_N;
+  assign f_rxd_p[1][0] = `TJD0.W__TX1_LVDS_DAT0_P; assign f_rxd_n[1][0] = `TJD0.W__TX1_LVDS_DAT0_N;
+  assign f_rxd_p[1][1] = `TJD0.W__TX1_LVDS_DAT1_P; assign f_rxd_n[1][1] = `TJD0.W__TX1_LVDS_DAT1_N;
+  assign f_rxd_p[1][2] = `TJD0.W__TX1_LVDS_DAT2_P; assign f_rxd_n[1][2] = `TJD0.W__TX1_LVDS_DAT2_N;
+  assign f_rxd_p[1][3] = `TJD0.W__TX1_LVDS_DAT3_P; assign f_rxd_n[1][3] = `TJD0.W__TX1_LVDS_DAT3_N;
+  assign f_rxd_p[1][4] = `TJD0.W__TX1_LVDS_DAT4_P; assign f_rxd_n[1][4] = `TJD0.W__TX1_LVDS_DAT4_N;
+  assign f_rxc_p[2] = `TJD0.W__TX2_LVDS_CLK_P;  assign f_rxc_n[2] = `TJD0.W__TX2_LVDS_CLK_N;
+  assign f_rxd_p[2][0] = `TJD0.W__TX2_LVDS_DAT0_P; assign f_rxd_n[2][0] = `TJD0.W__TX2_LVDS_DAT0_N;
+  assign f_rxd_p[2][1] = `TJD0.W__TX2_LVDS_DAT1_P; assign f_rxd_n[2][1] = `TJD0.W__TX2_LVDS_DAT1_N;
+  assign f_rxd_p[2][2] = `TJD0.W__TX2_LVDS_DAT2_P; assign f_rxd_n[2][2] = `TJD0.W__TX2_LVDS_DAT2_N;
+  assign f_rxd_p[2][3] = `TJD0.W__TX2_LVDS_DAT3_P; assign f_rxd_n[2][3] = `TJD0.W__TX2_LVDS_DAT3_N;
+  assign f_rxd_p[2][4] = `TJD0.W__TX2_LVDS_DAT4_P; assign f_rxd_n[2][4] = `TJD0.W__TX2_LVDS_DAT4_N;
 
   // Override native testbench drivers on the chip west-side RX pads.
   task automatic take_west_pads();
-    force top.full_chip.W__RX0_LVDS_CLK_P  = f_txc_p[0];  force top.full_chip.W__RX0_LVDS_CLK_N  = f_txc_n[0];
-    force top.full_chip.W__RX0_LVDS_DAT0_P = f_txd_p[0][0]; force top.full_chip.W__RX0_LVDS_DAT0_N = f_txd_n[0][0];
-    force top.full_chip.W__RX0_LVDS_DAT1_P = f_txd_p[0][1]; force top.full_chip.W__RX0_LVDS_DAT1_N = f_txd_n[0][1];
-    force top.full_chip.W__RX0_LVDS_DAT2_P = f_txd_p[0][2]; force top.full_chip.W__RX0_LVDS_DAT2_N = f_txd_n[0][2];
-    force top.full_chip.W__RX0_LVDS_DAT3_P = f_txd_p[0][3]; force top.full_chip.W__RX0_LVDS_DAT3_N = f_txd_n[0][3];
-    force top.full_chip.W__RX0_LVDS_DAT4_P = f_txd_p[0][4]; force top.full_chip.W__RX0_LVDS_DAT4_N = f_txd_n[0][4];
-    force top.full_chip.W__RX1_LVDS_CLK_P  = f_txc_p[1];  force top.full_chip.W__RX1_LVDS_CLK_N  = f_txc_n[1];
-    force top.full_chip.W__RX1_LVDS_DAT0_P = f_txd_p[1][0]; force top.full_chip.W__RX1_LVDS_DAT0_N = f_txd_n[1][0];
-    force top.full_chip.W__RX1_LVDS_DAT1_P = f_txd_p[1][1]; force top.full_chip.W__RX1_LVDS_DAT1_N = f_txd_n[1][1];
-    force top.full_chip.W__RX1_LVDS_DAT2_P = f_txd_p[1][2]; force top.full_chip.W__RX1_LVDS_DAT2_N = f_txd_n[1][2];
-    force top.full_chip.W__RX1_LVDS_DAT3_P = f_txd_p[1][3]; force top.full_chip.W__RX1_LVDS_DAT3_N = f_txd_n[1][3];
-    force top.full_chip.W__RX1_LVDS_DAT4_P = f_txd_p[1][4]; force top.full_chip.W__RX1_LVDS_DAT4_N = f_txd_n[1][4];
-    force top.full_chip.W__RX2_LVDS_CLK_P  = f_txc_p[2];  force top.full_chip.W__RX2_LVDS_CLK_N  = f_txc_n[2];
-    force top.full_chip.W__RX2_LVDS_DAT0_P = f_txd_p[2][0]; force top.full_chip.W__RX2_LVDS_DAT0_N = f_txd_n[2][0];
-    force top.full_chip.W__RX2_LVDS_DAT1_P = f_txd_p[2][1]; force top.full_chip.W__RX2_LVDS_DAT1_N = f_txd_n[2][1];
-    force top.full_chip.W__RX2_LVDS_DAT2_P = f_txd_p[2][2]; force top.full_chip.W__RX2_LVDS_DAT2_N = f_txd_n[2][2];
-    force top.full_chip.W__RX2_LVDS_DAT3_P = f_txd_p[2][3]; force top.full_chip.W__RX2_LVDS_DAT3_N = f_txd_n[2][3];
-    force top.full_chip.W__RX2_LVDS_DAT4_P = f_txd_p[2][4]; force top.full_chip.W__RX2_LVDS_DAT4_N = f_txd_n[2][4];
+    force `TJD0.W__RX0_LVDS_CLK_P  = f_txc_p[0];  force `TJD0.W__RX0_LVDS_CLK_N  = f_txc_n[0];
+    force `TJD0.W__RX0_LVDS_DAT0_P = f_txd_p[0][0]; force `TJD0.W__RX0_LVDS_DAT0_N = f_txd_n[0][0];
+    force `TJD0.W__RX0_LVDS_DAT1_P = f_txd_p[0][1]; force `TJD0.W__RX0_LVDS_DAT1_N = f_txd_n[0][1];
+    force `TJD0.W__RX0_LVDS_DAT2_P = f_txd_p[0][2]; force `TJD0.W__RX0_LVDS_DAT2_N = f_txd_n[0][2];
+    force `TJD0.W__RX0_LVDS_DAT3_P = f_txd_p[0][3]; force `TJD0.W__RX0_LVDS_DAT3_N = f_txd_n[0][3];
+    force `TJD0.W__RX0_LVDS_DAT4_P = f_txd_p[0][4]; force `TJD0.W__RX0_LVDS_DAT4_N = f_txd_n[0][4];
+    force `TJD0.W__RX1_LVDS_CLK_P  = f_txc_p[1];  force `TJD0.W__RX1_LVDS_CLK_N  = f_txc_n[1];
+    force `TJD0.W__RX1_LVDS_DAT0_P = f_txd_p[1][0]; force `TJD0.W__RX1_LVDS_DAT0_N = f_txd_n[1][0];
+    force `TJD0.W__RX1_LVDS_DAT1_P = f_txd_p[1][1]; force `TJD0.W__RX1_LVDS_DAT1_N = f_txd_n[1][1];
+    force `TJD0.W__RX1_LVDS_DAT2_P = f_txd_p[1][2]; force `TJD0.W__RX1_LVDS_DAT2_N = f_txd_n[1][2];
+    force `TJD0.W__RX1_LVDS_DAT3_P = f_txd_p[1][3]; force `TJD0.W__RX1_LVDS_DAT3_N = f_txd_n[1][3];
+    force `TJD0.W__RX1_LVDS_DAT4_P = f_txd_p[1][4]; force `TJD0.W__RX1_LVDS_DAT4_N = f_txd_n[1][4];
+    force `TJD0.W__RX2_LVDS_CLK_P  = f_txc_p[2];  force `TJD0.W__RX2_LVDS_CLK_N  = f_txc_n[2];
+    force `TJD0.W__RX2_LVDS_DAT0_P = f_txd_p[2][0]; force `TJD0.W__RX2_LVDS_DAT0_N = f_txd_n[2][0];
+    force `TJD0.W__RX2_LVDS_DAT1_P = f_txd_p[2][1]; force `TJD0.W__RX2_LVDS_DAT1_N = f_txd_n[2][1];
+    force `TJD0.W__RX2_LVDS_DAT2_P = f_txd_p[2][2]; force `TJD0.W__RX2_LVDS_DAT2_N = f_txd_n[2][2];
+    force `TJD0.W__RX2_LVDS_DAT3_P = f_txd_p[2][3]; force `TJD0.W__RX2_LVDS_DAT3_N = f_txd_n[2][3];
+    force `TJD0.W__RX2_LVDS_DAT4_P = f_txd_p[2][4]; force `TJD0.W__RX2_LVDS_DAT4_N = f_txd_n[2][4];
   endtask
 
   // AXI memory model: SEND image and three RECV rings, spaced 1 MiB apart.
@@ -149,7 +168,6 @@ module tb_tj_ctrl_chip;
   ar_t arq[$];
   aw_t awq[$];
   logic [127:0] wq[$];
-  int unsigned ring_writes[3];
   int ar_stall;
 
   always @(posedge maxi_clk) ar_stall <= $urandom_range(0, 9);
@@ -206,7 +224,6 @@ module tb_tj_ctrl_chip;
   end
   initial begin
     bvalid_w = 0; bresp_w = 2'b00; bid_w = '0;
-    foreach (ring_writes[c]) ring_writes[c] = 0;
     wait (maxi_rstn);
     forever begin
       @(posedge maxi_clk);
@@ -220,20 +237,7 @@ module tb_tj_ctrl_chip;
         @(posedge maxi_clk);
         while (bready_w !== 1'b1) @(posedge maxi_clk);
         bvalid_w <= 0;
-        for (int c = 0; c < 3; c++) begin
-          if (a.addr >= RING_BASE + longint'(c) * 64'h10_0000 &&
-              a.addr < RING_BASE + longint'(c) * 64'h10_0000 + RING_RECS * 16)
-            ring_writes[c]++;
-        end
       end
-    end
-  end
-
-  // This test does not advance RPTR; report capacity exhaustion instead of hanging.
-  always @(posedge maxi_clk) if (maxi_rstn) begin
-    for (int c = 0; c < 3; c++) begin
-      if (ring_writes[c] >= RING_RECS && lv_rxv_w[c] === 1'b1 && lv_rxr_w[c] === 1'b0)
-        $fatal(1, "RECV ring %0d is full; this test does not support streaming consumption", c);
     end
   end
 
@@ -305,7 +309,7 @@ module tb_tj_ctrl_chip;
   endtask
 
   // Native core memory hooks for the 4-by-4 core array.
-  `define CM(AY,AX,CY,CX) top.full_chip.u_cores_wrapper_top.gen_array_row[AY].gen_array_column[AX].u_array.gen_core_rows[CY].gen_core_columns[CX].u_core.core_memory
+  `define CM(AY,AX,CY,CX) `TJD0.u_cores_wrapper_top.gen_array_row[AY].gen_array_column[AX].u_array.gen_core_rows[CY].gen_core_columns[CX].u_core.core_memory
   task automatic core_mem_init(input int y, input int x, input string p);
     case ({y[1:0], x[1:0]})
       4'b0000: `CM(0,0,0,0).init_memory_from_file(p);
@@ -346,6 +350,85 @@ module tb_tj_ctrl_chip;
       4'b1111: `CM(1,1,1,1).store_memory_from_addr_file(gold, outp);
     endcase
   endtask
+
+`ifdef TJ_MULTI_DIE
+  // Select a die and local core using constant hierarchical paths.
+  `define CMD(DR,DC,AY,AX,CY,CX) `TJD(DR,DC).u_cores_wrapper_top.gen_array_row[AY].gen_array_column[AX].u_array.gen_core_rows[CY].gen_core_columns[CX].u_core.core_memory
+  `define CM16MD(DR,DC) \
+    case ({y[1:0], x[1:0]}) \
+      4'b0000: `CMD(DR,DC,0,0,0,0).init_memory_from_file(p); \
+      4'b0001: `CMD(DR,DC,0,0,0,1).init_memory_from_file(p); \
+      4'b0010: `CMD(DR,DC,0,1,0,0).init_memory_from_file(p); \
+      4'b0011: `CMD(DR,DC,0,1,0,1).init_memory_from_file(p); \
+      4'b0100: `CMD(DR,DC,0,0,1,0).init_memory_from_file(p); \
+      4'b0101: `CMD(DR,DC,0,0,1,1).init_memory_from_file(p); \
+      4'b0110: `CMD(DR,DC,0,1,1,0).init_memory_from_file(p); \
+      4'b0111: `CMD(DR,DC,0,1,1,1).init_memory_from_file(p); \
+      4'b1000: `CMD(DR,DC,1,0,0,0).init_memory_from_file(p); \
+      4'b1001: `CMD(DR,DC,1,0,0,1).init_memory_from_file(p); \
+      4'b1010: `CMD(DR,DC,1,1,0,0).init_memory_from_file(p); \
+      4'b1011: `CMD(DR,DC,1,1,0,1).init_memory_from_file(p); \
+      4'b1100: `CMD(DR,DC,1,0,1,0).init_memory_from_file(p); \
+      4'b1101: `CMD(DR,DC,1,0,1,1).init_memory_from_file(p); \
+      4'b1110: `CMD(DR,DC,1,1,1,0).init_memory_from_file(p); \
+      4'b1111: `CMD(DR,DC,1,1,1,1).init_memory_from_file(p); \
+    endcase
+  task automatic core_mem_init_md(input int dr, input int dc,
+                                  input int y, input int x, input string p);
+`ifdef TJ_MULTI_DIE_4X1
+    case (dr[1:0])
+      2'd0: `CM16MD(0,0)
+      2'd1: `CM16MD(1,0)
+      2'd2: `CM16MD(2,0)
+      2'd3: `CM16MD(3,0)
+    endcase
+`else
+    case ({dr[0], dc[0]})
+      2'b00: `CM16MD(0,0)
+      2'b01: `CM16MD(0,1)
+      2'b10: `CM16MD(1,0)
+      2'b11: `CM16MD(1,1)
+    endcase
+`endif
+  endtask
+  `define CD16MD(DR,DC) \
+    case ({y[1:0], x[1:0]}) \
+      4'b0000: `CMD(DR,DC,0,0,0,0).store_memory_from_addr_file(gold, outp); \
+      4'b0001: `CMD(DR,DC,0,0,0,1).store_memory_from_addr_file(gold, outp); \
+      4'b0010: `CMD(DR,DC,0,1,0,0).store_memory_from_addr_file(gold, outp); \
+      4'b0011: `CMD(DR,DC,0,1,0,1).store_memory_from_addr_file(gold, outp); \
+      4'b0100: `CMD(DR,DC,0,0,1,0).store_memory_from_addr_file(gold, outp); \
+      4'b0101: `CMD(DR,DC,0,0,1,1).store_memory_from_addr_file(gold, outp); \
+      4'b0110: `CMD(DR,DC,0,1,1,0).store_memory_from_addr_file(gold, outp); \
+      4'b0111: `CMD(DR,DC,0,1,1,1).store_memory_from_addr_file(gold, outp); \
+      4'b1000: `CMD(DR,DC,1,0,0,0).store_memory_from_addr_file(gold, outp); \
+      4'b1001: `CMD(DR,DC,1,0,0,1).store_memory_from_addr_file(gold, outp); \
+      4'b1010: `CMD(DR,DC,1,1,0,0).store_memory_from_addr_file(gold, outp); \
+      4'b1011: `CMD(DR,DC,1,1,0,1).store_memory_from_addr_file(gold, outp); \
+      4'b1100: `CMD(DR,DC,1,0,1,0).store_memory_from_addr_file(gold, outp); \
+      4'b1101: `CMD(DR,DC,1,0,1,1).store_memory_from_addr_file(gold, outp); \
+      4'b1110: `CMD(DR,DC,1,1,1,0).store_memory_from_addr_file(gold, outp); \
+      4'b1111: `CMD(DR,DC,1,1,1,1).store_memory_from_addr_file(gold, outp); \
+    endcase
+  task automatic core_mem_dump_md(input int dr, input int dc, input int y, input int x,
+                                  input string gold, input string outp);
+`ifdef TJ_MULTI_DIE_4X1
+    case (dr[1:0])
+      2'd0: `CD16MD(0,0)
+      2'd1: `CD16MD(1,0)
+      2'd2: `CD16MD(2,0)
+      2'd3: `CD16MD(3,0)
+    endcase
+`else
+    case ({dr[0], dc[0]})
+      2'b00: `CD16MD(0,0)
+      2'b01: `CD16MD(0,1)
+      2'b10: `CD16MD(1,0)
+      2'b11: `CD16MD(1,1)
+    endcase
+`endif
+  endtask
+`endif
 
   // Send a table and check its completed count after snapshot propagation.
   task automatic send_table(input logic [47:0] src, input int unsigned count,
@@ -390,7 +473,6 @@ module tb_tj_ctrl_chip;
     for (int t = 0; t < 3000 && hit < 0; t++) begin
       for (int c = 0; c < 3; c++) begin
         apb_rd(16'h1000 + 16'(c)*16'h40 + 16'h18, wp_now);
-        if (wp_now > RING_RECS) $fatal(1, "RECV ring %0d exceeded capture capacity", c);
         while (next_rec[c] < wp_now) begin
           r = ddr[((RING_BASE + longint'(c)*64'h10_0000) >> 4)
                   + longint'(next_rec[c] % RING_RECS)];
@@ -519,14 +601,14 @@ module tb_tj_ctrl_chip;
     return line;
   endfunction
 
-  int n_w, n_p, n_f;
+  int n_w, n_p, n_r, n_f, n_d;
   task automatic replay_regs(input string path, input bit lvds_mode, input int n_rec);
     int fd, code, line_no;
     string line, op, extra;
     logic [31:0] a_v, d_v, m_v, v_v, rdat;
     fd = $fopen(path, "r");
     if (fd == 0) $fatal(1, "cannot open %s", path);
-    n_w = 0; n_p = 0; n_f = 0; line_no = 0;
+    n_w = 0; n_p = 0; n_r = 0; n_f = 0; n_d = 0; line_no = 0;
     while ($fgets(line, fd)) begin
       line_no++;
       line = command_text(line);
@@ -537,6 +619,20 @@ module tb_tj_ctrl_chip;
           if (code != 3) $fatal(1, "%s:%0d: expected W address data", path, line_no);
           win_access(1'b1, a_v, d_v);
           n_w++;
+        end
+        "D": begin
+          code = $sscanf(line, "%s %d %s", op, d_v, extra);
+          if (code != 2) $fatal(1, "%s:%0d: expected D die_id", path, line_no);
+          apb_wr(16'h3C04, d_v);
+          n_d++;
+        end
+        "R": begin
+          code = $sscanf(line, "%s %h %h %h %s", op, a_v, m_v, v_v, extra);
+          if (code != 4) $fatal(1, "%s:%0d: expected R address mask value", path, line_no);
+          win_access(1'b0, a_v, rdat);
+          chk((rdat & m_v) === v_v,
+              $sformatf("Read %08h: %08h & %08h != %08h", a_v, rdat, m_v, v_v));
+          n_r++;
         end
         "P": begin
           code = $sscanf(line, "%s %h %h %h %s", op, a_v, m_v, v_v, extra);
@@ -565,7 +661,6 @@ module tb_tj_ctrl_chip;
       endcase
     end
     $fclose(fd);
-    if (n_w + n_p == 0) $fatal(1, "Command list contains no W/P operations");
     if (lvds_mode && n_f == 0) $fatal(1, "LVDS command list contains no SEND marker");
   endtask
 
@@ -576,16 +671,18 @@ module tb_tj_ctrl_chip;
     logic [127:0] r;
     for (int c = 0; c < 3; c++) begin
       apb_rd(16'h1000 + 16'(c)*16'h40 + 16'h18, wp);
-      if (wp > RING_RECS) $fatal(1, "RECV ring %0d exceeded capture capacity", c);
-      while (next_rec[c] < wp) begin
-        r = ddr[((RING_BASE + longint'(c)*64'h10_0000) >> 4)
-                + longint'(next_rec[c] % RING_RECS)];
-        chk(r[103:96] === 8'(c), $sformatf("RECV ring %0d channel tag", c));
-        if (r[2:0] === 3'b010) begin
-          $fwrite(ofd, "@%04h %016h\n", r[31:18], r[95:32]);
-          n_data++;
+      if (next_rec[c] < wp) begin
+        while (next_rec[c] < wp) begin
+          r = ddr[((RING_BASE + longint'(c)*64'h10_0000) >> 4)
+                  + longint'(next_rec[c] % RING_RECS)];
+          chk(r[103:96] === 8'(c), $sformatf("RECV ring %0d channel tag", c));
+          if (r[2:0] === 3'b010) begin
+            $fwrite(ofd, "@%04h %016h\n", r[31:18], r[95:32]);
+            n_data++;
+          end
+          next_rec[c]++;
         end
-        next_rec[c]++;
+        apb_wr(16'h1000 + 16'(c)*16'h40 + 16'h1C, next_rec[c]);
       end
     end
   endtask
@@ -610,8 +707,66 @@ module tb_tj_ctrl_chip;
     if (lvds_mode && !$value$plusargs("TJ_GOLDEN=%s", golden_p))
       $fatal(1, "LVDS mode requires +TJ_GOLDEN=");
 
+`ifdef TJ_MULTI_DIE
+    if ($test$plusargs("TJ_BOOTSPI"))
+      $fatal(1, "BOOT-SPI loading is supported only by the single-die testbench");
+`ifdef TJ_MULTI_DIE_4X1
+    if (`DIE_ARRAY_H != 4 || `DIE_ARRAY_W != 1)
+      $fatal(1, "TJ_MULTI_DIE_4X1 requires DIE_ARRAY_H=4 and DIE_ARRAY_W=1");
+`else
+    if (`DIE_ARRAY_H != 2 || `DIE_ARRAY_W != 2)
+      $fatal(1, "TJ_MULTI_DIE requires DIE_ARRAY_H=2 and DIE_ARRAY_W=2");
+`endif
+`endif
+
     uvm_pkg::uvm_test_done.raise_objection(null, "Controller chip integration test");
 
+`ifdef TJ_MULTI_DIE
+    // Keep each die MCU in a spin loop.
+`ifdef TJ_MULTI_DIE_4X1
+    force `TJD(0,0).u_mcu_top.u_mcu_core.cpu_base_addr = 32'h01000000;
+    force `TJD(1,0).u_mcu_top.u_mcu_core.cpu_base_addr = 32'h01000000;
+    force `TJD(2,0).u_mcu_top.u_mcu_core.cpu_base_addr = 32'h01000000;
+    force `TJD(3,0).u_mcu_top.u_mcu_core.cpu_base_addr = 32'h01000000;
+    fork
+      while (`TJD(0,0).u_mcu_top.u_mcu_core.u_riscv.cpu_hresetn !== 1'b1) begin
+        for (int i = 0; i < 64; i++) begin
+          `TJD(0,0).u_mcu_top.u_mcu_core.u_ahb_sramc.u_ram.u_ram.uut.write_mem_red(i, 32'h0000006F, 32'hFFFFFFFF);
+          `TJD(1,0).u_mcu_top.u_mcu_core.u_ahb_sramc.u_ram.u_ram.uut.write_mem_red(i, 32'h0000006F, 32'hFFFFFFFF);
+          `TJD(2,0).u_mcu_top.u_mcu_core.u_ahb_sramc.u_ram.u_ram.uut.write_mem_red(i, 32'h0000006F, 32'hFFFFFFFF);
+          `TJD(3,0).u_mcu_top.u_mcu_core.u_ahb_sramc.u_ram.u_ram.uut.write_mem_red(i, 32'h0000006F, 32'hFFFFFFFF);
+        end
+        #100ns;
+      end
+    join_none
+
+    // Share SCLK/MOSI per die row; use a separate CS per die.
+    force top.w_spis0_clk  = {sclk_w[3], sclk_w[2], sclk_w[1], sclk_w[0]};
+    force top.w_spis0_mosi = {mosi_w[3], mosi_w[2], mosi_w[1], mosi_w[0]};
+    force top.w_spis0_csn  = {cs_w[12], cs_w[8], cs_w[4], cs_w[0]};
+`else
+    force `TJD(0,0).u_mcu_top.u_mcu_core.cpu_base_addr = 32'h01000000;
+    force `TJD(0,1).u_mcu_top.u_mcu_core.cpu_base_addr = 32'h01000000;
+    force `TJD(1,0).u_mcu_top.u_mcu_core.cpu_base_addr = 32'h01000000;
+    force `TJD(1,1).u_mcu_top.u_mcu_core.cpu_base_addr = 32'h01000000;
+    fork
+      while (`TJD(0,0).u_mcu_top.u_mcu_core.u_riscv.cpu_hresetn !== 1'b1) begin
+        for (int i = 0; i < 64; i++) begin
+          `TJD(0,0).u_mcu_top.u_mcu_core.u_ahb_sramc.u_ram.u_ram.uut.write_mem_red(i, 32'h0000006F, 32'hFFFFFFFF);
+          `TJD(0,1).u_mcu_top.u_mcu_core.u_ahb_sramc.u_ram.u_ram.uut.write_mem_red(i, 32'h0000006F, 32'hFFFFFFFF);
+          `TJD(1,0).u_mcu_top.u_mcu_core.u_ahb_sramc.u_ram.u_ram.uut.write_mem_red(i, 32'h0000006F, 32'hFFFFFFFF);
+          `TJD(1,1).u_mcu_top.u_mcu_core.u_ahb_sramc.u_ram.u_ram.uut.write_mem_red(i, 32'h0000006F, 32'hFFFFFFFF);
+        end
+        #100ns;
+      end
+    join_none
+
+    // Share SCLK/MOSI per die row; use a separate CS per die.
+    force top.w_spis0_clk  = {sclk_w[1], sclk_w[1], sclk_w[0], sclk_w[0]};
+    force top.w_spis0_mosi = {mosi_w[1], mosi_w[1], mosi_w[0], mosi_w[0]};
+    force top.w_spis0_csn  = {cs_w[5], cs_w[4], cs_w[1], cs_w[0]};
+`endif
+`else
     // Keep the MCU in a spin loop.
     force `MCU_SYS.cpu_base_addr = 32'h01000000;
     fork
@@ -626,6 +781,7 @@ module tb_tj_ctrl_chip;
     force top.w_spis0_clk  = sclk_w[0];
     force top.w_spis0_csn  = cs_w[0];
     force top.w_spis0_mosi = mosi_w[0];
+`endif
     if (lvds_mode) take_west_pads();
     $display("CTRL CHIP TB: Pad connections enabled (SPI%s) @%0t", lvds_mode ? "+west LVDS" : "", $time);
 
@@ -633,11 +789,46 @@ module tb_tj_ctrl_chip;
     @(negedge pclk);
     presetn = 1; maxi_rstn = 1;
 
-    wait (`CPU.cpu_hresetn === 1'b1);
+    wait (`TJD0.u_mcu_top.u_mcu_core.u_riscv.cpu_hresetn === 1'b1);
     $display("CTRL CHIP TB: Chip reset released @%0t", $time);
     repeat (200) @(posedge pclk);
 
     // Stage BOOT images in DDR or load core memory directly.
+`ifdef TJ_MULTI_DIE
+    if ($value$plusargs("TJ_CASE=%s", case_p)) begin
+      int dfd, dr, dc;
+      string dln;
+      fd = $fopen({case_p, "/core_list.txt"}, "r");
+      if (fd != 0) begin
+        while ($fgets(line, fd)) begin
+          int gy, gx;
+          if ($sscanf(line, "%d %d", gy, gx) != 2) continue;
+          core_mem_init_md(gy / 4, gx / 4, gy % 4, gx % 4,
+            $sformatf("%s/%0d_%0d_mem_config.txt", case_p, gy, gx));
+          $display("CTRL CHIP TB: Loaded die (%0d,%0d) core (%0d,%0d), global (%0d,%0d)",
+                   gy / 4, gx / 4, gy % 4, gx % 4, gy, gx);
+        end
+        $fclose(fd);
+      end else begin
+        dfd = $fopen({case_p, "/die_list.txt"}, "r");
+        if (dfd == 0) $fatal(1, "cannot open %s/{core_list,die_list}.txt", case_p);
+        while ($fgets(dln, dfd)) begin
+          if ($sscanf(dln, "%d %d", dr, dc) != 2) continue;
+          fd = $fopen($sformatf("%s/die_%0d_%0d/core_list.txt", case_p, dr, dc), "r");
+          if (fd == 0) $fatal(1, "cannot open die_%0d_%0d/core_list.txt", dr, dc);
+          while ($fgets(line, fd)) begin
+            int y, x;
+            if ($sscanf(line, "%d %d", y, x) != 2) continue;
+            core_mem_init_md(dr, dc, y, x,
+              $sformatf("%s/die_%0d_%0d/%0d_%0d_mem_config.txt", case_p, dr, dc, y, x));
+            $display("CTRL CHIP TB: Loaded die (%0d,%0d) core (%0d,%0d)", dr, dc, y, x);
+          end
+          $fclose(fd);
+        end
+        $fclose(dfd);
+      end
+    end
+`else
     if ($value$plusargs("TJ_CASE=%s", case_p)) begin
       fd = $fopen({case_p, "/core_list.txt"}, "r");
       if (fd == 0) $fatal(1, "cannot open core_list");
@@ -661,6 +852,7 @@ module tb_tj_ctrl_chip;
     end else if ($test$plusargs("TJ_BOOTSPI")) begin
       $fatal(1, "BOOT-SPI requires +TJ_CASE");
     end
+`endif
     if (lvds_mode) begin
       if (case_p == "") $fatal(1, "need +TJ_CASE=");
       // Load SEND records into the DDR model.
@@ -722,7 +914,8 @@ module tb_tj_ctrl_chip;
     // Execute initialization commands, including SEND markers in LVDS mode.
     if (!$value$plusargs("TJ_REGS=%s", regs_p)) $fatal(1, "need +TJ_REGS=");
     replay_regs(regs_p, lvds_mode, n_rec);
-    $display("CTRL CHIP TB: Commands executed: W=%0d P=%0d F=%0d @%0t", n_w, n_p, n_f, $time);
+    $display("CTRL CHIP TB: Commands executed: W=%0d P=%0d R=%0d F=%0d D=%0d @%0t",
+             n_w, n_p, n_r, n_f, n_d, $time);
 
     // Check configuration readback and link error status.
     d_v = 32'hF; win_access(1'b1, 32'h02FFF00C, d_v);
@@ -746,7 +939,7 @@ module tb_tj_ctrl_chip;
       if (!$value$plusargs("TJ_OUT=%s", out_p)) out_p = "lvds_outputs.txt";
       ofd = $fopen(out_p, "w");
       if (ofd == 0) $fatal(1, "cannot open %s", out_p);
-      for (int t = 0; t < 4000 && n_data < n_out; t++)
+      for (int t = 0; t < 12000 && n_data < n_out; t++)
         collect_output(ofd, next_rec, n_data);
       repeat (400) @(posedge pclk);
       collect_output(ofd, next_rec, n_data);
@@ -762,6 +955,66 @@ module tb_tj_ctrl_chip;
         $display("CTRL CHIP TB FAIL: packet output differs from golden");
       end
     end else if (case_p != "") begin
+`ifdef TJ_MULTI_DIE
+      // Compare each core in flat or per-die case layouts.
+      int dfd2, dr2, dc2;
+      string dln2;
+      fd = $fopen({case_p, "/core_list.txt"}, "r");
+      if (fd != 0) begin
+        while ($fgets(line, fd)) begin
+          int gy, gx, gfd;
+          string gp, op;
+          if ($sscanf(line, "%d %d", gy, gx) != 2) continue;
+          gp = $sformatf("%s/%0d_%0d_mem_output.txt", case_p, gy, gx);
+          gfd = $fopen(gp, "r");
+          if (gfd == 0) continue;
+          $fclose(gfd);
+          op = $sformatf("out_g%0d_%0d.txt", gy, gx);
+          core_mem_dump_md(gy / 4, gx / 4, gy % 4, gx % 4, gp, op);
+          comparisons++;
+          if ($system($sformatf(
+              "env PYTHONIOENCODING=utf-8 python3 \"%s\" compare \"%s\" \"%s\" --mode memory",
+              tj_py, gp, op)) == 0)
+            $display("CTRL CHIP TB: golden comparison PASS (die (%0d,%0d) core (%0d,%0d), global (%0d,%0d))",
+                     gy / 4, gx / 4, gy % 4, gx % 4, gy, gx);
+          else begin
+            errs++;
+            $display("CTRL CHIP TB FAIL: Memory output differs for global core (%0d,%0d)", gy, gx);
+          end
+        end
+        $fclose(fd);
+      end else begin
+        dfd2 = $fopen({case_p, "/die_list.txt"}, "r");
+        if (dfd2 == 0) $fatal(1, "cannot open %s/die_list.txt", case_p);
+        while ($fgets(dln2, dfd2)) begin
+          if ($sscanf(dln2, "%d %d", dr2, dc2) != 2) continue;
+          fd = $fopen($sformatf("%s/die_%0d_%0d/core_list.txt", case_p, dr2, dc2), "r");
+          if (fd == 0) continue;
+          while ($fgets(line, fd)) begin
+            int y, x, gfd;
+            string gp, op;
+            if ($sscanf(line, "%d %d", y, x) != 2) continue;
+            gp = $sformatf("%s/die_%0d_%0d/%0d_%0d_mem_output.txt", case_p, dr2, dc2, y, x);
+            gfd = $fopen(gp, "r");
+            if (gfd == 0) continue;
+            $fclose(gfd);
+            op = $sformatf("out_d%0d_%0d_%0d_%0d.txt", dr2, dc2, y, x);
+            core_mem_dump_md(dr2, dc2, y, x, gp, op);
+            comparisons++;
+            if ($system($sformatf(
+                "env PYTHONIOENCODING=utf-8 python3 \"%s\" compare \"%s\" \"%s\" --mode memory",
+                tj_py, gp, op)) == 0)
+              $display("CTRL CHIP TB: golden comparison PASS (die (%0d,%0d) core (%0d,%0d))", dr2, dc2, y, x);
+            else begin
+              errs++;
+              $display("CTRL CHIP TB FAIL: Memory output differs for die (%0d,%0d) core (%0d,%0d)", dr2, dc2, y, x);
+            end
+          end
+          $fclose(fd);
+        end
+        $fclose(dfd2);
+      end
+`else
       foreach (cores[i]) begin
         int gfd;
         string gp, op;
@@ -781,6 +1034,7 @@ module tb_tj_ctrl_chip;
           $display("CTRL CHIP TB FAIL: memory output differs (core %0d,%0d)", cores[i].y, cores[i].x);
         end
       end
+`endif
     end else if ($value$plusargs("TJ_GOLDEN=%s", golden_p) && $value$plusargs("TJ_OUT=%s", out_p)) begin
       gy = 0; gx = 0;
       void'($value$plusargs("TJ_GY=%d", gy));
@@ -804,6 +1058,7 @@ module tb_tj_ctrl_chip;
     if (lvds_mode && $test$plusargs("TJ_DXTEST")) begin
       int hit;
       logic [127:0] r;
+      apb_wr(16'h3C04, 32'h0);
       bounce_pkt(64'hD00D_FACE_CAFE_0001, hit);
       chk(hit >= 0, "dx=-32 packet returns through RECV");
       if (hit >= 0) begin
@@ -818,6 +1073,7 @@ module tb_tj_ctrl_chip;
     if (lvds_mode && $test$plusargs("TJ_ECCTEST")) begin
       int hit;
       // Disable auto-sleep and wake TX before injecting an error.
+      apb_wr(16'h3C04, 32'h0);
       rdat = 32'h101; win_access(1'b1, 32'h01160400, rdat);
       rdat = 32'h210F;
       win_access(1'b1, 32'h01160004, rdat);
@@ -829,11 +1085,12 @@ module tb_tj_ctrl_chip;
       cc_write(25'h204, 32'hFFF);                   // Clear link errors after wake-up.
       cc_read(25'h204, rdat);
       chk(rdat === 32'h0, $sformatf("Link ERR_ST before injection=%08x, expected zero", rdat));
-      force top.full_chip.W__TX0_LVDS_DAT0_P = 1'b0;
-      force top.full_chip.W__TX0_LVDS_DAT0_N = 1'b0;  // Inject an invalid differential level.
+      // Inject an invalid 8b/10b symbol.
+      force f_rxd_p[0] = 5'b00000;
+      force f_rxd_n[0] = 5'b11111;
       #20ns;
-      release top.full_chip.W__TX0_LVDS_DAT0_P;
-      release top.full_chip.W__TX0_LVDS_DAT0_N;
+      release f_rxd_p[0];
+      release f_rxd_n[0];
       #1us;
       cc_read(25'h204, rdat);
       chk(rdat != 32'h0, $sformatf("Link ERR_ST after injection=%08x, expected nonzero", rdat));

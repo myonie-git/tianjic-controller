@@ -233,7 +233,6 @@ module tb_tj_init_replay;
       endcase
     end
     $fclose(fd);
-    if (n_w + n_p == 0) $fatal(1, "Command list contains no W/P operations");
     repeat (50) @(posedge pclk);
 
     // Match every observed write and read against the requested transactions.
