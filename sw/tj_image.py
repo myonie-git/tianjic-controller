@@ -11,7 +11,7 @@ Outputs:
   send_image.bin: 16-byte little-endian SEND records.
   boot_prim_*.bin: 32-byte little-endian core memory rows.
   manifest.json: image files, core coordinates and row-address segments.
-  init_regs.txt: W/P/B/F initialization recipe for the caller to execute.
+  init_regs.txt: W/P/D/B/F initialization recipe for the caller to execute.
 
 Records: tag[127:112], flags[111:104], ch[103:96], pkt[95:0].
 TX flags: LAST bit0, FENCE bit1 (wait for prior TX handshakes), IRQ bit2.
@@ -155,66 +155,127 @@ def do_export(case_dir, outdir, ch=0, irq_last=False):
         n_rec = len(rows)
     report['send_records'] = n_rec
 
-    # Per-core images from die subdirectories or a flat case directory.
+    # Global core coordinates, per-die directories, or a single-die directory.
+    root_cl = os.path.join(case_dir, 'core_list.txt')
+    global_flat = (os.path.isfile(os.path.join(case_dir, 'die_list.txt'))
+                   and os.path.isfile(root_cl))
+
+    # Entries: die, local y/x, memory path, control path, source coordinate name.
+    entries = []
+    if global_flat:
+        for gy, gx in read_pairs(root_cl):
+            mp = os.path.join(case_dir, '%d_%d_mem_config.txt' % (gy, gx))
+            cp = os.path.join(case_dir, '%d_%d_ctrl_config.txt' % (gy, gx))
+            entries.append(('die_%d_%d' % (gy // 4, gx // 4), gy % 4, gx % 4,
+                            mp, cp if os.path.isfile(cp) else None,
+                            '%d_%d' % (gy, gx)))
+    else:
+        die_dirs = sorted(d for d in os.listdir(case_dir)
+                          if d.startswith('die_') and os.path.isdir(os.path.join(case_dir, d)))
+        scopes = [(d, os.path.join(case_dir, d)) for d in die_dirs] or [('die_0_0', case_dir)]
+        for die_name, droot in scopes:
+            for fn in sorted(os.listdir(droot)):
+                m = re.match(r'^(\d+)_(\d+)_mem_config\.txt$', fn)
+                if not m:
+                    continue
+                y, x = int(m.group(1)), int(m.group(2))
+                cp = os.path.join(droot, '%d_%d_ctrl_config.txt' % (y, x))
+                entries.append((die_name, y, x, os.path.join(droot, fn),
+                                cp if os.path.isfile(cp) else None, '%d_%d' % (y, x)))
+
     manifest = []
-    die_dirs = sorted(d for d in os.listdir(case_dir)
-                      if d.startswith('die_') and os.path.isdir(os.path.join(case_dir, d)))
-    scopes = [(d, os.path.join(case_dir, d)) for d in die_dirs] or [('die_0_0', case_dir)]
-    for die_name, droot in scopes:
-        for fn in sorted(os.listdir(droot)):
-            m = re.match(r'^(\d+)_(\d+)_mem_config\.txt$', fn)
-            if not m:
-                continue
-            y, x = int(m.group(1)), int(m.group(2))
-            rows = parse_at_pairs(os.path.join(droot, fn))
-            lines = dict(rows)
-            addrs = sorted(lines)
-            blob_name = 'boot_prim_%s_%d_%d.bin' % (die_name, y, x)
-            with open(os.path.join(outdir, blob_name), 'wb') as f:
-                for a in addrs:
-                    f.write(lines[a].to_bytes(32, 'little'))
-            contiguous_head = addrs == list(range(len(addrs)))
-            boot_chain = 1 <= len(rows) <= 4 and all(
-                address == index for index, (address, _) in enumerate(rows))
-            # Each segment describes destination rows for the next part of the blob.
-            segments = []
+    for die_name, y, x, mem_path, _ctrl, gname in entries:
+        rows = parse_at_pairs(mem_path)
+        lines = dict(rows)
+        addrs = sorted(lines)
+        blob_name = 'boot_prim_%s_%s.bin' % (die_name, gname)
+        with open(os.path.join(outdir, blob_name), 'wb') as f:
             for a in addrs:
-                if segments and a == segments[-1][0] + segments[-1][1]:
-                    segments[-1][1] += 1
-                else:
-                    segments.append([a, 1])
-            manifest.append({
-                'die': die_name, 'core_y': y, 'core_x': x,
-                'file': blob_name, 'lines': len(lines),
-                'start_line': addrs[0] if addrs else 0,
-                'kind': 'boot_chain' if boot_chain else 'full_image',
-                'line_addrs_contiguous': contiguous_head,
-                'segments': segments,
-            })
+                f.write(lines[a].to_bytes(32, 'little'))
+        contiguous_head = addrs == list(range(len(addrs)))
+        boot_chain = 1 <= len(rows) <= 4 and all(
+            address == index for index, (address, _) in enumerate(rows))
+        # Each segment describes destination rows for the next part of the blob.
+        segments = []
+        for a in addrs:
+            if segments and a == segments[-1][0] + segments[-1][1]:
+                segments[-1][1] += 1
+            else:
+                segments.append([a, 1])
+        manifest.append({
+            'die': die_name, 'core_y': y, 'core_x': x,
+            'file': blob_name, 'lines': len(lines),
+            'start_line': addrs[0] if addrs else 0,
+            'kind': 'boot_chain' if boot_chain else 'full_image',
+            'line_addrs_contiguous': contiguous_head,
+            'segments': segments,
+        })
     with io.open(os.path.join(outdir, 'manifest.json'), 'w', encoding='utf-8') as f:
         json.dump({'case': report['case'], 'send_records': n_rec, 'ch': ch,
                    'cores': manifest}, f, ensure_ascii=False, indent=1)
     report['cores'] = len(manifest)
 
     # Initialization recipe and per-core start sequences.
+    is_md = os.path.isfile(os.path.join(case_dir, 'die_list.txt'))
+    cur_die = [None]
+
+    def sel_die(f, die_name):
+        if not is_md or cur_die[0] == die_name:
+            return
+        m = re.match(r'^die_(\d+)_(\d+)$', die_name)
+        f.write('D %d  # Select %s.\n'
+                % (int(m.group(1)) * 4 + int(m.group(2)), die_name))
+        cur_die[0] = die_name
+
     cores = []
+    if global_flat:
+        cores = [(dn, y, x, ct) for (dn, y, x, _mp, ct, _g) in entries]
+    else:
+        for die_name, droot in scopes:
+            cl = os.path.join(droot, 'core_list.txt')
+            if os.path.isfile(cl):
+                for y, x in read_pairs(cl):
+                    ctrl = os.path.join(droot, '%d_%d_ctrl_config.txt' % (y, x))
+                    cores.append((die_name, y, x, ctrl if os.path.isfile(ctrl) else None))
+
     core_config = {}
-    for die_name, droot in scopes:
-        cl = os.path.join(droot, 'core_list.txt')
-        if os.path.isfile(cl):
-            for y, x in read_pairs(cl):
-                key = (die_name, y, x)
-                cores.append(key)
-                ctrl = os.path.join(droot, '%d_%d_ctrl_config.txt' % (y, x))
-                cfg = parse_at_file(ctrl).get(0x80008, 0x4) if os.path.isfile(ctrl) else 0x4
-                core_config[key] = cfg & ~0x1
+    for die_name, y, x, ctrl in cores:
+        cfg = parse_at_file(ctrl).get(0x80008, 0x4) if ctrl else 0x4
+        core_config[(die_name, y, x)] = cfg & ~0x1
+
+    # Shared light-sleep and clock-gating values replace the broadcast defaults.
+    BCAST_FROM_CTRL = {0x80010: 0x02080010, 0x8001C: 0x0208001C}
+    ctrl_maps = [parse_at_file(c[3]) for c in cores if c[3]]
+    all_ctrl = len(cores) > 0 and len(ctrl_maps) == len(cores)
+    uniform_ctrl = all_ctrl and all(m == ctrl_maps[0] for m in ctrl_maps)
+    bcast_override = ({BCAST_FROM_CTRL[a]: v for a, v in ctrl_maps[0].items()
+                       if a in BCAST_FROM_CTRL} if uniform_ctrl else {})
+    recipe_dies = []
+    for dn, _y, _x, _c in cores:
+        if dn not in recipe_dies:
+            recipe_dies.append(dn)
     with io.open(os.path.join(outdir, 'init_regs.txt'), 'w', encoding='utf-8') as f:
-        f.write('# SPI recipe: W address data; P address mask value; B marks BOOT loading; F marks a SEND transfer.\n')
-        for op, a, v, cmt in INIT_RECIPE:
-            f.write('%s %08X %08X  # %s\n' % (op, a, v, cmt))
+        f.write('# SPI recipe: W address data; P address mask value; D die_id; '
+                'B marks BOOT loading; F marks a SEND transfer.\n')
+        for die_name in recipe_dies:
+            sel_die(f, die_name)
+            for op, a, v, cmt in INIT_RECIPE:
+                if a in bcast_override:
+                    f.write('%s %08X %08X  # %s Value from ctrl_config.\n'
+                            % (op, a, bcast_override[a], cmt))
+                else:
+                    f.write('%s %08X %08X  # %s\n' % (op, a, v, cmt))
         f.write('B 00000000 00000000  # Load core templates via BOOT when enabled.\n')
-        for die_name, y, x in cores:
+        for die_name, y, x, ctrl in cores:
+            sel_die(f, die_name)
             f.write('W 02FFF00C %08X  # Select core %s (%d,%d).\n' % ((y << 2) | x, die_name, y, x))
+            if ctrl and not uniform_ctrl:
+                # Apply per-core values; start and config_en use the sequence below.
+                for ca, cv in sorted(parse_at_file(ctrl).items()):
+                    if ca in (0x80004, 0x80008):
+                        continue
+                    f.write('W %08X %08X  # Per-core ctrl_config @%05x.\n'
+                            % (0x02000000 + ca, cv, ca))
             # Pulse config_en; preserve the other CONFIG bits.
             cfg = core_config[(die_name, y, x)]
             f.write('W 02080008 %08X  # config_en=1; preserve core CONFIG\n' % (cfg | 0x1))
@@ -225,20 +286,24 @@ def do_export(case_dir, outdir, ch=0, irq_last=False):
         if n_rec:
             # LVDS cases: receive the SEND image, then start computation.
             f.write('F 00000000 00000000  # Send send_image.bin and wait for SEND completion.\n')
-            for die_name, y, x in cores:
+            for die_name, y, x, _ctrl in cores:
+                sel_die(f, die_name)
                 f.write('W 02FFF00C %08X  # Select core %s (%d,%d).\n' % ((y << 2) | x, die_name, y, x))
                 f.write('P 02080018 00000001 00000001  # Wait for receive completion.\n')
             f.write('# Start computation without another CONFIG pulse.\n')
-            for die_name, y, x in cores:
+            for die_name, y, x, _ctrl in cores:
+                sel_die(f, die_name)
                 f.write('W 02FFF00C %08X  # Select core %s (%d,%d).\n' % ((y << 2) | x, die_name, y, x))
                 f.write('W 02080004 00000001  # Start computation.\n')
                 f.write('W 02080004 00000000\n')
-            for die_name, y, x in cores:
+            for die_name, y, x, _ctrl in cores:
+                sel_die(f, die_name)
                 f.write('W 02FFF00C %08X  # Select core %s (%d,%d).\n' % ((y << 2) | x, die_name, y, x))
                 f.write('P 02080018 00000001 00000001  # Wait for compute completion.\n')
         else:
             # Memory-only cases start once and wait until idle.
-            for die_name, y, x in cores:
+            for die_name, y, x, _ctrl in cores:
+                sel_die(f, die_name)
                 f.write('W 02FFF00C %08X  # Select core %s (%d,%d).\n' % ((y << 2) | x, die_name, y, x))
                 f.write('P 02080018 00000001 00000001  # Wait for compute completion.\n')
     report['init_cores'] = len(cores)

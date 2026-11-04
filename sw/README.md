@@ -23,10 +23,11 @@ python3 controller/sw/tj_image.py selftest /path/to/case -o /path/to/selftest_ou
 | `send_image.bin` | 16字节小端 SEND 记录流；用例包含 `lvds_config.txt` 时生成 |
 | `boot_prim_*.bin` | 各核内存镜像，每行32字节、小端编码 |
 | `manifest.json` | 镜像文件、die及核坐标、行数和地址段 |
-| `init_regs.txt` | 初始化配方：`W` 写寄存器，`P` 轮询寄存器，`B` 标记 BOOT 装载位置，`F` 标记 SEND 投递位置 |
+| `init_regs.txt` | 初始化配方：`W` 写寄存器，`P` 轮询寄存器，`D` 切换目标 die，`B` 标记 BOOT 装载位置，`F` 标记 SEND 投递位置 |
 
 文件装载、寄存器访问和任务启动由 Host 软件或仿真环境执行。
-当前初始化配方不包含目标 die 切换指令。
+多 die 用例通过 `D <die_id>` 切换目标 die，编号为 `die_row * 4 + die_col`，使用十进制。
+后续 `W`、`P` 命令作用于选中的 die。
 
 ## 比较模式
 

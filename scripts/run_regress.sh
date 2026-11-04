@@ -3,6 +3,7 @@
 # Usage: sh controller/scripts/run_regress.sh
 # Requires Python 3 and VCS in PATH; SpyGlass is optional.
 # REGRESS_WORK selects the output directory, which is cleared before each run.
+# INIT_CASE selects the single-die initialization replay case.
 # SEEDS overrides SPI seeds; EXTRA_SEEDS appends more.
 # SKIP_APB_SMOKE, SKIP_SG and SKIP_LNK skip the corresponding stages.
 set -u
@@ -189,22 +190,26 @@ else
   fi
 fi
 
-# Initialization command replay.
-if [ ! -d "$IMAGE_CASE" ]; then
-  say "[8/12] 初始化命令重放:测例目录不可达,跳过"
+# Initialization command replay with the single-die SPI model.
+INIT_CASE=${INIT_CASE:-/data_8T_2/Tianjic/all_cases/die_extern/resnet9_lvds}
+if [ ! -d "$INIT_CASE" ]; then
+  say "[8/12] Initialization replay: skipped (case directory not found: $INIT_CASE)"
 else
-  say "[8/12] 初始化命令重放(host→APB→SPIWIN→SPI→spi2ahb)"
+  say "[8/12] Single-die initialization replay (APB -> SPIWIN -> SPI -> spi2ahb)"
   mkdir -p "$WORK/init"
-  if ( cd "$WORK/init" && \
+  if ( INIT_CASE=$(cd "$INIT_CASE" && pwd) && \
+    python3 "$TJ_CTRL_HOME/sw/tj_image.py" export "$INIT_CASE" \
+      -o "$WORK/init/image" && \
+    cd "$WORK/init" && \
     vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
       "$YAWING_DESIGN/rtl/mcu_subsys/spi/spi2ahb.v" \
       "$TJ_CTRL_HOME/tb/init/tb_tj_init_replay.sv" && \
     vcs -full64 -nc tb_tj_init_replay -o simv && \
-    ./simv -nc +REGS="$WORK/image/out/init_regs.txt" ) > "$WORK/init/run.log" 2>&1 && \
+    ./simv -nc +REGS="$WORK/init/image/init_regs.txt" ) > "$WORK/init/run.log" 2>&1 && \
     sim_passed "$WORK/init/run.log" "INIT REPLAY TB"; then
     say "    $(grep 'INIT REPLAY TB PASS' "$WORK/init/run.log")"
   else
-    bad "初始化命令重放构建或测试失败(见 $WORK/init/run.log)"
+    bad "Initialization replay build or test failed (see $WORK/init/run.log)"
   fi
 fi
 

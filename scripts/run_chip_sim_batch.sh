@@ -2,6 +2,7 @@
 # Run the default die-level cases sequentially, followed by any extra cases.
 # Usage: sh controller/scripts/run_chip_sim_batch.sh [extra_case ...]
 # Case names are relative to ROOT below.
+# MD=1 appends the small multi-die cases.
 # Each batch keeps separate logs under TMPDIR (default: /tmp).
 set -u
 ROOT=/data_8T_2/Tianjic/all_cases
@@ -21,6 +22,10 @@ core_array/branch_eq
 core_array/loop_lif_9_2_2
 die/16_core_resnet9
 die/16_core_spiketrans
+"
+[ "${MD:-0}" = "1" ] && CASES="$CASES
+multi_die/conv_split_lvds_2dies_small
+multi_die/conv_split_spi_lvds_2dies_small
 "
 [ $# -gt 0 ] && CASES="$CASES $*"
 
