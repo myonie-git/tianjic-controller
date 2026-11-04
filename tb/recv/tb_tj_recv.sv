@@ -278,10 +278,22 @@ module tb_tj_recv;
     cfg_settle();
   endtask
 
+  // Rotate packet types independently of DUT constants.
+  localparam logic [3:0] CHIP_END_CODES  [4] = '{4'h6, 4'hE, 4'h4, 4'hC};
+  localparam logic [3:0] CHIP_DATA_CODES [2] = '{4'h2, 4'hA};
+  int end_rr = 0;
+  int dat_rr = 0;
+
   function automatic logic [95:0] mk_pkt(input bit is_end);
     logic [95:0] p;
     p = {$urandom, $urandom, $urandom};
-    p[3:0] = is_end ? 4'h4 : 4'h2;
+    if (is_end) begin
+      p[3:0] = CHIP_END_CODES[end_rr % 4];
+      end_rr++;
+    end else begin
+      p[3:0] = CHIP_DATA_CODES[dat_rr % 2];
+      dat_rr++;
+    end
     return p;
   endfunction
 
