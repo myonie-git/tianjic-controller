@@ -190,12 +190,12 @@ else
   fi
 fi
 
-# Initialization command replay with the single-die SPI model.
+# Initialization command replay through SPI-to-AHB models.
 INIT_CASE=${INIT_CASE:-/data_8T_2/Tianjic/all_cases/die_extern/resnet9_lvds}
 if [ ! -d "$INIT_CASE" ]; then
   say "[8/12] Initialization replay: skipped (case directory not found: $INIT_CASE)"
 else
-  say "[8/12] Single-die initialization replay (APB -> SPIWIN -> SPI -> spi2ahb)"
+  say "[8/12] Initialization replay (APB -> SPIWIN -> SPI -> spi2ahb)"
   mkdir -p "$WORK/init"
   if ( INIT_CASE=$(cd "$INIT_CASE" && pwd) && \
     python3 "$TJ_CTRL_HOME/sw/tj_image.py" export "$INIT_CASE" \

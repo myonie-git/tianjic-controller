@@ -74,14 +74,14 @@ REGRESS_WORK="$regress_work" sh controller/scripts/run_regress.sh
 
 该入口运行生成物一致性、CSR、SPI、顶层展开、APB冒烟、lint、镜像工具与格式、
 初始化重放、LVDS链路、SEND、RECV和BOOT检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 种子，
-`IMAGE_CASE` 选择镜像格式检查用例，`INIT_CASE` 选择单 die 初始化回放用例；
+`IMAGE_CASE` 选择镜像格式检查用例，`INIT_CASE` 选择初始化回放用例；
 `SKIP_APB_SMOKE`、`SKIP_SG`、`SKIP_LNK` 可跳过对应项目。
 工具或用例不可用时，部分项目也会跳过，运行结果须结合日志中的跳过项查看。
 
 镜像阶段先运行 Python CLI 测试，检查地址段、比较器和各核 CONFIG，再用 SV 核对记录及内存数据。
 初始化回放默认使用单 die 用例 `die_extern/resnet9_lvds`。
-初始化重放测例执行 `W` 和 `P`，跳过 `B` 和 `F`，并统计跳过的 `F` 数量。存储模型预置 `IDLE=1`。
-多 die 的 `D` 目标切换由芯片联合仿真检查。
+初始化重放测例执行 `W` 和 `P`，用 `D` 选择 die0或die1，分别核对每个die的AHB读写。
+测例跳过 `B` 和 `F`，并统计跳过的 `F` 数量；两个存储模型均预置 `IDLE=1`。
 BOOT 测例 [tb_tj_boot.sv](tb/boot/tb_tj_boot.sv) 通过 die 0 的 `spi2ahb` 比对 AHB 写入。
 它检查等待 DDR 时中止、原语写入中止、首次通过 APB 读到 `BUSY=0` 时的 `DONE/ERR`、DST 边界和装载期间的 SPIWIN 读取。
 回归的 BOOT 阶段共用一次编译，按三组 `pclk/maxi_clk` 频率运行（MHz）：100/416.7、250/50、10/100。

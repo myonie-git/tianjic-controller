@@ -1,7 +1,7 @@
 // File        : tb_tj_init_replay.sv
 // Module      : tb_tj_init_replay
-// Description : Replay W/P commands through APB, SPIWIN and the chip SPI-to-AHB bridge.
-//               Check observed AHB transactions. Skip B/F markers; the model supplies IDLE=1.
+// Description : Replay W/P/D commands through APB, SPIWIN and two SPI-to-AHB bridges.
+//               Check per-die AHB transactions. Skip B/F markers; models supply IDLE=1.
 // Usage       : +REGS=<init_regs.txt>
 module tb_tj_init_replay;
   timeunit 1ns;
@@ -56,9 +56,9 @@ module tb_tj_init_replay;
   logic [1:0]  htrans;
   logic        hwrite, hready, hresp, hlock;
   logic [3:0]  hprot;
-  logic        miso0;
+  logic        miso0, miso1;
 
-  spi2ahb u_chip (
+  spi2ahb U_chip0 (
     .spi_cs_n(cs_n[0]), .spi_sck(sclk[0]), .spi_mosi(mosi[0]), .spi_miso(miso0),
     .hclk(pclk), .hresetn(presetn),
     .hrdata(hrdata), .hready(hready), .hresp(hresp),
@@ -68,6 +68,7 @@ module tb_tj_init_replay;
   always_comb begin
     miso = '0;
     miso[0] = miso0;
+    miso[1] = miso1;
   end
 
   // Word storage indexed by the full byte address.
@@ -106,6 +107,58 @@ module tb_tj_init_replay;
       wr_log.push_back(w);
     end
     if (ap_v && !ap_w) rd_log.push_back(ap_a);
+  end
+
+  // Chip SPI-to-AHB bridge, connected to die 1.
+  logic [31:0] haddr1, hwdata1, hrdata1;
+  logic [2:0]  hburst1, hsize1;
+  logic [1:0]  htrans1;
+  logic        hwrite1, hready1, hresp1, hlock1;
+  logic [3:0]  hprot1;
+
+  spi2ahb u_chip1 (
+    .spi_cs_n(cs_n[1]), .spi_sck(sclk[0]), .spi_mosi(mosi[0]), .spi_miso(miso1),
+    .hclk(pclk), .hresetn(presetn),
+    .hrdata(hrdata1), .hready(hready1), .hresp(hresp1),
+    .haddr(haddr1), .hburst(hburst1), .hmastlock(hlock1), .hprot(hprot1),
+    .hsize(hsize1), .htrans(htrans1), .hwdata(hwdata1), .hwrite(hwrite1)
+  );
+
+  // Word storage indexed by the full byte address.
+  logic [31:0] mem1 [int unsigned];
+  logic        ap_v1, ap_w1;
+  logic [31:0] ap_a1;
+  assign hresp1  = 1'b0;
+  assign hready1 = 1'b1;
+  always_comb begin
+    hrdata1 = '0;
+    if (ap_v1 && !ap_w1) hrdata1 = mem1[ap_a1];
+  end
+  always @(posedge pclk or negedge presetn) begin
+    if (!presetn) begin
+      ap_v1 <= 0;
+      ap_w1 <= 0;
+      ap_a1 <= '0;
+    end
+    else begin
+      if (ap_v1 && ap_w1) mem1[ap_a1] <= hwdata1;
+      ap_v1 <= htrans1[1];
+      ap_a1 <= haddr1;
+      ap_w1 <= hwrite1;
+    end
+  end
+
+  // Capture AHB data phases in transaction order.
+  wr_t     wr_log1[$];
+  logic [31:0] rd_log1[$];
+  always @(posedge pclk) if (presetn) begin
+    if (ap_v1 && ap_w1) begin
+      wr_t w;
+      w.a = ap_a1;
+      w.d = hwdata1;
+      wr_log1.push_back(w);
+    end
+    if (ap_v1 && !ap_w1) rd_log1.push_back(ap_a1);
   end
 
   // APB accesses complete only with known ready and no slave error.
@@ -156,10 +209,10 @@ module tb_tj_init_replay;
 
   // Replay initialization commands. F markers belong to the chip integration test.
   string regs_p, line, op, extra;
-  int fd, code, n_w, n_p, n_f, poll_i, line_no;
+  int fd, code, n_w, n_p, n_f, n_d, poll_i, line_no, die_v, cur_die;
   logic [31:0] a_v, d_v, m_v, v_v, rdat;
-  wr_t exp_q[$];
-  logic [31:0] exp_rd_q[$];
+  wr_t exp_q[$], exp_q1[$];
+  logic [31:0] exp_rd_q[$], exp_rd_q1[$];
 
   initial begin
     psel = 0;
@@ -170,6 +223,8 @@ module tb_tj_init_replay;
     n_w = 0;
     n_p = 0;
     n_f = 0;
+    n_d = 0;
+    cur_die = 0;
     line_no = 0;
     repeat (8) @(posedge pclk);
     @(negedge pclk);
@@ -183,6 +238,7 @@ module tb_tj_init_replay;
 
     // The model reports idle without executing a core program.
     mem[32'h02080018] = 32'h1;
+    mem1[32'h02080018] = 32'h1;
 
     apb_wr(16'h0410, 32'h1);  // SPI[0].CLKDIV: 25 MHz at pclk=100 MHz.
     apb_wr(16'h3C00, 32'h1);  // Enable SPIWIN.
@@ -206,7 +262,8 @@ module tb_tj_init_replay;
           if (code != 3) $fatal(1, "%s:%0d: expected W address data", regs_p, line_no);
           e.a = a_v;
           e.d = d_v;
-          exp_q.push_back(e);
+          if (cur_die == 0) exp_q.push_back(e);
+          else              exp_q1.push_back(e);
           win_access(1'b1, a_v, d_v);
           n_w++;
         end
@@ -215,7 +272,8 @@ module tb_tj_init_replay;
           if (code != 4) $fatal(1, "%s:%0d: expected P address mask value", regs_p, line_no);
           poll_i = 0;
           do begin
-            exp_rd_q.push_back(a_v);
+            if (cur_die == 0) exp_rd_q.push_back(a_v);
+            else              exp_rd_q1.push_back(a_v);
             win_access(1'b0, a_v, rdat);
             poll_i++;
           end while (((rdat & m_v) !== v_v) && poll_i < 20);
@@ -223,6 +281,16 @@ module tb_tj_init_replay;
               $sformatf("Poll %08h failed after %0d reads: %08h & %08h != %08h",
                         a_v, poll_i, rdat, m_v, v_v));
           n_p++;
+        end
+        "D": begin
+          code = $sscanf(line, "%s %d %s", op, die_v, extra);
+          if (code != 2) $fatal(1, "%s:%0d: expected D die", regs_p, line_no);
+          if (die_v != 0 && die_v != 1)
+            $fatal(1, "%s:%0d: die %0d has no model; supported targets are 0 and 1",
+                   regs_p, line_no, die_v);
+          apb_wr(16'h3C04, 32'(die_v));
+          cur_die = die_v;
+          n_d++;
         end
         "B", "F": begin
           code = $sscanf(line, "%s %h %h %s", op, a_v, d_v, extra);
@@ -237,20 +305,35 @@ module tb_tj_init_replay;
 
     // Match every observed write and read against the requested transactions.
     chk(wr_log.size() == exp_q.size(),
-        $sformatf("AHB writes: got %0d, expected %0d", wr_log.size(), exp_q.size()));
+        $sformatf("die0 AHB writes: got %0d, expected %0d", wr_log.size(), exp_q.size()));
     for (int i = 0; i < exp_q.size() && i < wr_log.size(); i++) begin
       chk(wr_log[i].a === exp_q[i].a && wr_log[i].d === exp_q[i].d,
-          $sformatf("Write %0d: got %08h=%08h, expected %08h=%08h",
+          $sformatf("die0 Write %0d: got %08h=%08h, expected %08h=%08h",
                     i, wr_log[i].a, wr_log[i].d, exp_q[i].a, exp_q[i].d));
     end
     chk(rd_log.size() == exp_rd_q.size(),
-        $sformatf("AHB reads: got %0d, expected %0d", rd_log.size(), exp_rd_q.size()));
+        $sformatf("die0 AHB reads: got %0d, expected %0d", rd_log.size(), exp_rd_q.size()));
     for (int i = 0; i < exp_rd_q.size() && i < rd_log.size(); i++) begin
       chk(rd_log[i] === exp_rd_q[i],
-          $sformatf("Read %0d: got %08h, expected %08h", i, rd_log[i], exp_rd_q[i]));
+          $sformatf("die0 Read %0d: got %08h, expected %08h", i, rd_log[i], exp_rd_q[i]));
     end
 
-    $display("Replayed %0d writes and %0d polls; skipped %0d SEND markers", n_w, n_p, n_f);
+    // Match every observed write and read against the requested transactions.
+    chk(wr_log1.size() == exp_q1.size(),
+        $sformatf("die1 AHB writes: got %0d, expected %0d", wr_log1.size(), exp_q1.size()));
+    for (int i = 0; i < exp_q1.size() && i < wr_log1.size(); i++) begin
+      chk(wr_log1[i].a === exp_q1[i].a && wr_log1[i].d === exp_q1[i].d,
+          $sformatf("die1 Write %0d: got %08h=%08h, expected %08h=%08h",
+                    i, wr_log1[i].a, wr_log1[i].d, exp_q1[i].a, exp_q1[i].d));
+    end
+    chk(rd_log1.size() == exp_rd_q1.size(),
+        $sformatf("die1 AHB reads: got %0d, expected %0d", rd_log1.size(), exp_rd_q1.size()));
+    for (int i = 0; i < exp_rd_q1.size() && i < rd_log1.size(); i++) begin
+      chk(rd_log1[i] === exp_rd_q1[i],
+          $sformatf("die1 Read %0d: got %08h, expected %08h", i, rd_log1[i], exp_rd_q1[i]));
+    end
+
+    $display("Replayed W=%0d P=%0d D=%0d; skipped %0d SEND markers", n_w, n_p, n_d, n_f);
     if (errs == 0 && checks > 0)
       $display("INIT REPLAY TB PASS (%0d checks)", checks);
     else
