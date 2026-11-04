@@ -87,7 +87,7 @@ blocks:
       - name: RAW
         offset: 0x00
         kind: W1C
-        desc: "原始事件,硬件置位、写 1 清零。[7:0]=SPI 完成 [8]=BOOT 完成 [9]=SEND 完成/记录 irq 标志(同表多个 irq 标志合并为首次一报,进度以 SEND.SENT 追踪) [10]=CC 完成 [11]=TRACE 回绕 [23:12]=RECV 通道事件 [24]=SPI 超时 [25]=ECC 不可纠 [26]=链路停滞 [27]=RECV 溢出 [28]=AXI 响应错 [29]=BOOT 错 [31:30]=保留"
+        desc: "原始事件,硬件置位、写 1 清零。[7:0]=SPI 完成 [8]=BOOT 完成 [9]=SEND 完成/记录 irq 标志(同表多个 irq 标志合并为首次一报,进度以 SEND.SENT 追踪) [10]=CC 完成 [11]=TRACE 回绕 [23:12]=RECV 通道事件 [24]=SPI 超时 [25]=ECC 不可纠 [26]=链路停滞 [27]=RECV 溢出 [28]=AXI 响应错 [29]=BOOT 错 [31:30]=保留。位11、25、26未接硬件事件，可通过IRQ.TST置位。"
 
       - name: EN
         offset: 0x04
@@ -277,7 +277,7 @@ blocks:
       - name: DST
         offset: 0x10
         kind: RW
-        desc: "芯片侧目标地址。FW_LOAD用于ILM/DLM，须64字节对齐，末字节不得超过0xFFFFFFFF。BOOT_PRIM须32字节对齐，整段须位于核内存0x02000000至0x0207FFFF。软件须在GO前完成芯片侧配置与选核，CLK_SHIFT由引擎控制。"
+        desc: "芯片侧目标地址。FW_LOAD用于ILM/DLM，须64字节对齐，末字节不得超过0xFFFFFFFF。BOOT_PRIM须32字节对齐，整段须位于核内存0x02000000至0x0207FFFF。BOOT_PRIM启动前，软件须保证目标核SRAM可写并退出Light Sleep，通过SPIWIN在同一die写0x02FFF000=0x001使能配置且关闭广播，再向0x02FFF00C写入选核值（y左移2位，与x按位或）；SPIWIN.PAGE.DIE须与BOOT.CMD.DIE一致。任务结束前保持该die的配置使能、广播状态和选核不变，CLK_SHIFT由引擎控制。"
 
       - name: DB
         offset: 0x14
@@ -483,12 +483,14 @@ blocks:
       - name: FC_TMO
         offset: 0x0C
         kind: RW
+        impl: v2
         reset: 0x000F4240
-        desc: "链路停滞超时(REQ-LNK-09,RESEND/WAIT 单发丢失死锁的解套计时,pclk 周期)"
+        desc: "预留：链路停滞超时，单位为pclk周期；当前未实现。"
 
       - name: CNT_SEL
         offset: 0x10
-        desc: "计数器窗口选择(间接读,省地址)"
+        impl: v2
+        desc: "预留：链路计数器选择；当前未实现计数器窗口。"
         fields:
           - name: CH
             bits: "3:0"
@@ -503,13 +505,15 @@ blocks:
       - name: CNT_VAL
         offset: 0x14
         kind: RO
-        desc: "CNT_SEL 选中的计数值"
+        impl: v2
+        desc: "预留：CNT_SEL选中的计数值；当前未实现。"
 
       - name: STA
         offset: 0x18
         kind: RO
         bits: "7:0"
-        desc: "链路状态(实例 0:位分配随 C1 定,含 rx 就绪/校准完成)"
+        impl: v2
+        desc: "预留：链路状态汇总；当前未实现。FPGA侧LVDS状态通过CC配置链接口读取。"
 
   # PRBS link testing.
   - name: PRBS
@@ -547,7 +551,8 @@ blocks:
   - name: TRACE
     base: 0x3000
     size: 0x100
-    desc: "包 trace 环形缓存(REQ-DBG-02;片上 BRAM,APB 窗口回读)"
+    impl: v2
+    desc: "预留：包捕获与回读缓冲；当前未实现，IRQ.RAW[11]没有硬件事件源。"
     regs:
       - name: CTRL
         offset: 0x00
