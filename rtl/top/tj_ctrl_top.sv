@@ -105,6 +105,17 @@ module tj_ctrl_top
   output logic                   uart_tx
 );
 
+  // Supported top-level parameter combinations.
+  if (N_CH != TJ_CSR_RECV_N) begin : g_nch_guard
+    $fatal(1, "N_CH must match the CSR channel count.");
+  end
+  if (APB_AW != 16) begin : g_apbaw_guard
+    $fatal(1, "APB_AW must be 16.");
+  end
+  if (AXI_AW < 48) begin : g_axiaw_guard
+    $fatal(1, "AXI_AW must be at least 48.");
+  end
+
   // CSR inputs and outputs.
   tj_csr_i_t hwi;
   tj_csr_o_t hwo;
