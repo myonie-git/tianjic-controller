@@ -251,7 +251,7 @@ blocks:
           - name: KIND
             bits: "1:0"
             kind: RW
-            desc: "0=FW_LOAD(DDR→ILM/DLM,WR16 流)1=BOOT_PRIM(DDR 模板→core cfg 窗口,引擎带 CLK_SHIFT 序列);2 保留(v2:MBOX_POLL)"
+            desc: "0=FW_LOAD，1=BOOT_PRIM。2/3保留；写GO后以ERR_CODE=3错误完成，不发起DDR或SPI事务。"
 
           - name: DIE
             bits: "8:4"
@@ -310,7 +310,7 @@ blocks:
           - name: ERR_CODE
             bits: "15:12"
             kind: RO
-            desc: "1=SPI超时，2=AXI读错，3=KIND、LEN或DST非法。其余编码保留。"
+            desc: "1=SPI超时，2=AXI读错，3=KIND、LEN或DST非法。其余编码保留。BOOT_PRIM因SPI超时结束后，CLK_SHIFT可能未恢复为0，软件应在重试或启动前恢复。"
 
   # DDR-to-LVDS record transfer.
   - name: SEND

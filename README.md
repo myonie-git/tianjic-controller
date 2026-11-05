@@ -74,6 +74,7 @@ REGRESS_WORK="$regress_work" sh controller/scripts/run_regress.sh
 
 该入口运行生成物一致性、CSR、SPI、顶层展开、APB冒烟、lint、镜像工具与格式、
 初始化重放、LVDS链路、SEND、RECV和BOOT检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 种子，
+`DSEEDS` 控制 SEND、RECV、BOOT 种子，默认 `default 31 166 7`；BOOT 每档时钟都运行这些种子。
 `IMAGE_CASE` 选择镜像格式检查用例，`INIT_CASE` 选择初始化回放用例；
 `SKIP_APB_SMOKE`、`SKIP_SG`、`SKIP_LNK` 可跳过对应项目。
 工具或用例不可用时，部分项目也会跳过，运行结果须结合日志中的跳过项查看。

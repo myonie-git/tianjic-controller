@@ -3,8 +3,9 @@
 # Usage: sh controller/scripts/run_regress.sh
 # Requires Python 3 and VCS in PATH; SpyGlass is optional.
 # REGRESS_WORK selects the output directory, which is cleared before each run.
-# INIT_CASE selects the single-die initialization replay case.
+# INIT_CASE selects the initialization replay case.
 # SEEDS overrides SPI seeds; EXTRA_SEEDS appends more.
+# DSEEDS selects seeds for SEND, RECV and BOOT.
 # SKIP_APB_SMOKE, SKIP_SG and SKIP_LNK skip the corresponding stages.
 set -u
 
@@ -15,6 +16,7 @@ export YAWING_DESIGN=${YAWING_DESIGN:-$REPO/soc/design}
 export TIANJIC_A_DESIGN=${TIANJIC_A_DESIGN:-$REPO/design}
 WORK=${REGRESS_WORK:-/tmp/tj_regress_$(id -un)}
 SEEDS=${SEEDS:-"default 31 166 336 7 99"}${EXTRA_SEEDS:+" $EXTRA_SEEDS"}
+DSEEDS=${DSEEDS:-"default 31 166 7"}
 FAIL=0
 
 say()  { printf '%s\n' "== $*"; }
@@ -228,9 +230,34 @@ else
   fi
 fi
 
+# Run each data-path seed using the same compiled simulator.
+data_runs() {
+  data_dir=$1
+  data_name=$2
+  data_label=$3
+  shift 3
+  data_first=1
+  for data_seed in $DSEEDS; do
+    data_arg=""
+    [ "$data_seed" = "default" ] || data_arg="+ntb_random_seed=$data_seed"
+    if [ "$data_first" -eq 1 ]; then
+      data_log="$data_dir/$data_label.log"
+      data_first=0
+    else
+      data_log="$data_dir/${data_label}_$data_seed.log"
+    fi
+    if ( cd "$data_dir" && ./simv -nc $data_arg "$@" ) > "$data_log" 2>&1 &&
+         sim_passed "$data_log" "$data_name"; then
+      say "    $data_name $data_label seed=$data_seed: $(grep "^$data_name PASS" "$data_log")"
+    else
+      bad "$data_name $data_label seed=$data_seed failed (see $data_log)"
+    fi
+  done
+}
+
 # SEND path test.
 echo
-say "[10/12] SEND 验收 TB(APB门铃→AXI取数→解析分发→缝TX,九相位;含 导出镜像重放)"
+say "[10/12] SEND path test"
 mkdir -p "$WORK/send"
 IMG_ARG=""
 [ -f "$WORK/image/out/send_image.bin" ] && IMG_ARG="+IMG=$WORK/image/out/send_image.bin"
@@ -238,39 +265,29 @@ if ( cd "$WORK/send" && \
   vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
     "$TJ_CTRL_HOME/tb/send/tj_send_verification_top.sv" \
     "$TJ_CTRL_HOME/tb/send/tb_tj_send.sv" && \
-  vcs -full64 -nc tb_tj_send -o simv && \
-  ./simv -nc $IMG_ARG ) > "$WORK/send/run.log" 2>&1 && \
-  sim_passed "$WORK/send/run.log" "SEND TB"; then
-  say "    $(grep 'SEND TB PASS' "$WORK/send/run.log")${IMG_ARG:+(含镜像重放)}"
+  vcs -full64 -nc tb_tj_send -o simv ) > "$WORK/send/build.log" 2>&1 &&
+  log_clean "$WORK/send/build.log"; then
+  data_runs "$WORK/send" "SEND TB" run $IMG_ARG
 else
-  bad "SEND TB 未 PASS(见 $WORK/send/run.log)"
+  bad "SEND TB build failed (see $WORK/send/build.log)"
 fi
 
 # RECV path test.
 echo
-say "[11/12] RECV 验收 TB(缝RX→环形写→host消费,九相位;含 SEND→RECV 环回)"
+say "[11/12] RECV path test"
 mkdir -p "$WORK/recv"
 if ( cd "$WORK/recv" && \
   vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
     "$TJ_CTRL_HOME/tb/recv/tb_tj_recv.sv" && \
-  vcs -full64 -nc tb_tj_recv -o simv && \
-  ./simv -nc ) > "$WORK/recv/run.log" 2>&1 && \
-  sim_passed "$WORK/recv/run.log" "RECV TB"; then
-  say "    $(grep 'RECV TB PASS' "$WORK/recv/run.log")"
+  vcs -full64 -nc tb_tj_recv -o simv ) > "$WORK/recv/build.log" 2>&1 &&
+  log_clean "$WORK/recv/build.log"; then
+  data_runs "$WORK/recv" "RECV TB" run
 else
-  bad "RECV TB 未 PASS(见 $WORK/recv/run.log)"
+  bad "RECV TB build failed (see $WORK/recv/build.log)"
 fi
 
-# BOOT data loading through SPI.
-boot_profile() {
-  if ( cd "$WORK/boot" && ./simv -nc "+TJ_PCLK_HP=$2" "+TJ_MAXI_HP=$3" ) \
-       > "$WORK/boot/$1" 2>&1 && sim_passed "$WORK/boot/$1" "BOOT TB"; then
-    say "    $1: $(grep '^BOOT TB PASS' "$WORK/boot/$1")"
-  else
-    bad "BOOT TB failed (see $WORK/boot/$1)"
-  fi
-}
-say "[12/12] BOOT 引擎测试"
+# BOOT data loading through SPI, at all three clock ratios.
+say "[12/12] BOOT engine test"
 mkdir -p "$WORK/boot"
 if ( cd "$WORK/boot" && \
   vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
@@ -278,9 +295,9 @@ if ( cd "$WORK/boot" && \
     "$TJ_CTRL_HOME/tb/boot/tb_tj_boot.sv" && \
   vcs -full64 -nc tb_tj_boot -o simv ) > "$WORK/boot/build.log" 2>&1 &&
   log_clean "$WORK/boot/build.log"; then
-  boot_profile run.log          5.0   1.2
-  boot_profile run_delivery.log 2.0  10.0
-  boot_profile run_boundary.log 50.0  5.0
+  data_runs "$WORK/boot" "BOOT TB" run          +TJ_PCLK_HP=5.0  +TJ_MAXI_HP=1.2
+  data_runs "$WORK/boot" "BOOT TB" run_delivery +TJ_PCLK_HP=2.0  +TJ_MAXI_HP=10.0
+  data_runs "$WORK/boot" "BOOT TB" run_boundary +TJ_PCLK_HP=50.0 +TJ_MAXI_HP=5.0
 else
   bad "BOOT TB build failed (see $WORK/boot/build.log)"
 fi

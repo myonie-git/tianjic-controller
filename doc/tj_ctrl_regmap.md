@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 映射版本 | v0.1.0 |
-| 真源指纹 | md5=e8e0bd4f8144(gen_csr.py 自动生成,真源 `controller/csr/tj_ctrl_csr.yaml`,勿手改;同源再生成逐字节相同)|
+| 真源指纹 | md5=8fb421b7209d(gen_csr.py 自动生成,真源 `controller/csr/tj_ctrl_csr.yaml`,勿手改;同源再生成逐字节相同)|
 | 总线 | APB,32bit 数据,字节地址,窗口 64KB;零等待;未映射/预留地址返回 pslverr |
 | 约定 | W1C=硬件置位、写 1 清零(同拍冲突置位优先);脉冲=写 1 出单拍、读恒 0;写 RO 忽略不报错 |
 
@@ -92,7 +92,7 @@ SPI组控制与状态；逻辑接口为组内4个die共用SCLK/MOSI、独立CS/M
 
 | 偏移 | 寄存器 | 位 | 字段 | 类型 | 复位 | 说明 |
 |---|---|---|---|---|---|---|
-| 0x00 | CMD | [1:0] | KIND | RW | 0x0 | 操作命令<br>0=FW_LOAD(DDR→ILM/DLM,WR16 流)1=BOOT_PRIM(DDR 模板→core cfg 窗口,引擎带 CLK_SHIFT 序列);2 保留(v2:MBOX_POLL) |
+| 0x00 | CMD | [1:0] | KIND | RW | 0x0 | 操作命令<br>0=FW_LOAD，1=BOOT_PRIM。2/3保留；写GO后以ERR_CODE=3错误完成，不发起DDR或SPI事务。 |
 |  |  | [8:4] | DIE | RW | 0x0 | 目标 die 全局编号 0~31(多 die 由 host 循环敲门) |
 | 0x04 | SRC_LO | [31:0] | — | RW | 0x0 | DDR 源地址低 32 位。源地址须按 64 字节对齐。BOOT_PRIM 模板由驱动预置于 DDR，长度由 BOOT.LEN 指定。 |
 | 0x08 | SRC_HI | [15:0] | — | RW | 0x0 | DDR 源地址 [47:32] |
@@ -102,7 +102,7 @@ SPI组控制与状态；逻辑接口为组内4个die共用SCLK/MOSI、独立CS/M
 | 0x18 | STA | [0] | BUSY | RO | — | 状态<br>进行中 |
 |  |  | [8] | DONE | W1C | 0x0 | 完成 |
 |  |  | [9] | ERR | W1C | 0x0 | 出错(见 ERR_CODE) |
-|  |  | [15:12] | ERR_CODE | RO | — | 1=SPI超时，2=AXI读错，3=KIND、LEN或DST非法。其余编码保留。 |
+|  |  | [15:12] | ERR_CODE | RO | — | 1=SPI超时，2=AXI读错，3=KIND、LEN或DST非法。其余编码保留。BOOT_PRIM因SPI超时结束后，CLK_SHIFT可能未恢复为0，软件应在重试或启动前恢复。 |
 
 ## SEND(基址 0x0C00)
 
