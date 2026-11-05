@@ -33,5 +33,12 @@ sh controller/scripts/run_quartus_ooc.sh
 默认目标为 Cyclone 10 GX `10CX220YF672E5G`，顶层端口使用虚拟引脚。`FAM` 和 `DEV` 选择器件，
 `PCLK_NS` 和 `MAXI_NS` 设置两个时钟周期，默认分别为 4 ns 和 10 ns。交付档使用 `MAXI_NS=20`。
 
+在已安装 Agilex 7 器件库并具备编译许可的 Quartus 环境中，用以下命令按交付时钟构建 `AGIB041R29D1E2VB`。
+
+```sh
+FAM="Agilex 7" DEV=AGIB041R29D1E2VB PCLK_NS=4.0 MAXI_NS=20.0 \
+  sh controller/scripts/run_quartus_ooc.sh
+```
+
 2026-08-12 的 Cyclone 10 GX 块级工程按 250/100 MHz 运行。该次 `tjctrl` 工程原始摘要：
 [综合](evidence/tjctrl.syn.summary)、[资源](evidence/tjctrl.fit.summary)、[时序](evidence/tjctrl.sta.summary)。
