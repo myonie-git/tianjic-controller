@@ -47,10 +47,36 @@ SEND 的标志位为 LAST(bit0)、FENCE(bit1)、IRQ(bit2)，按记录中的逻�
 SEND 表起始地址要求64字节对齐。RECV 按通道写入环形缓冲，Host 读取后更新 RPTR 归还空间。
 跨域计数和指针通过快照读回，可能滞后于数据通路；具体操作顺序见寄存器及模块说明。
 
-BOOT 在 `maxi_clk` 请求到达时锁存 64 字节对齐的块地址。集成时先定义时钟并设置
-`TJ_BOOT_MAXI_PERIOD`（`maxi_clk` 周期，单位 ns），再按工具加载
-`scripts/tj_boot_fetch_addr.sdc`、`tj_boot_fetch_addr_quartus.sdc` 或 `tj_boot_fetch_addr_vivado.xdc`。
-仅将请求翻转到同步器首级的控制路径设为异步输入。42 位地址数据路径须参与时序分析。
+## CDC 时序约束
+
+本轮 Intel FPGA 交付使用 Quartus TimeQuest 约束。Synopsys 和 Vivado 文件供参考。
+先定义 `pclk` 和 `maxi_clk`，再从 `scripts/` 加载所选工具对应的六组约束。
+
+| 工具 | 公共约束 | 五组配套文件的命名 |
+|---|---|---|
+| Quartus TimeQuest | `tj_ctrl_quartus.sdc` | `tj_<组名>_quartus.sdc` |
+| Synopsys DC / PrimeTime | `tj_ctrl.sdc` | `tj_<组名>.sdc` |
+| Vivado | `tj_ctrl_vivado.xdc` | `tj_<组名>_vivado.xdc` |
+
+SEND 启动配置的延迟上界目前仅在 Quartus 版实现，预算为一个 `maxi_clk` 周期。
+
+- Synopsys DC 需先设置下表的周期变量，再用 Tcl `source` 逐份加载。直接使用 `read_sdc` 会报错。PrimeTime 尚未验证。
+- Vivado 已验证两级同步器的 `ASYNC_REG` 标记。BOOT 时序约束的对象查询还会选中 `CARRY4`，`blk_err` 的 CDC 报告仍待复核。
+
+公共约束覆盖同步器首级和 BOOT 返回的块数据、错误标志。五个组名为 `send_snapshot`、
+`ts_snapshot`、`recv_wptr_snapshot`、`recv_rptr_snapshot` 和 `boot_fetch_addr`。
+在加载前设置各路径的目的时钟周期（ns）：
+
+| 目的时钟 | 周期变量 |
+|---|---|
+| `pclk` | `TJ_BOOT_PCLK_PERIOD`、`TJ_SEND_PCLK_PERIOD`、`TJ_TS_PCLK_PERIOD`、`TJ_RECV_PCLK_PERIOD` |
+| `maxi_clk` | `TJ_BOOT_MAXI_PERIOD`、`TJ_RECV_MAXI_PERIOD` |
+
+交付时钟示例为 4 ns 和 20 ns。集成到更大的顶层时，将查询限定在 Controller 实例，核对综合后实际命中的寄存器。
+两个时钟域之间按路径设置时序例外；整域异步分组会屏蔽这些数据路径的最大延迟约束。
+
+BOOT 在 `maxi_clk` 收到请求时锁存 64 字节对齐的块地址。`boot_fetch_addr` 对请求同步器首级设置例外，
+并约束 42 位地址从 `f_blk_addr[47:6]` 到 `addr_q[47:6]` 的最大延迟。
 本次 Cyclone 10 GX 实现覆盖三档时钟，布线时采用 2.4 ns 地址预算和 0.30 ns 的
 `TJ_BOOT_FIT_HOLD_MARGIN`。签核时取消这个布线裕量，按实际 `maxi_clk` 周期检查建立和保持。
 
@@ -128,6 +154,7 @@ sh controller/scripts/run_chip_sim_batch.sh
 随源码提供：
 
 - [寄存器手册](doc/tj_ctrl_regmap.md)：寄存器地址、位域和操作说明。
+- [SEND 取数 FIFO 综合记录](doc/tj_send_fetch_synth_note.md)：FIFO 结构及工具报告中的存储器映射。
 - [镜像工具](sw/README.md)：导出文件、比较模式、地址段和初始化命令清单。
 - 各测试目录的 README：运行方式和具体覆盖范围，入口见上表。
 
