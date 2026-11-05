@@ -1,0 +1,7 @@
+# Controller CDC clocks: pclk 250 MHz, maxi_clk 50 MHz.
+# Both reset inputs are active low.
+current_design tj_ctrl_top
+clock -name pclk -domain pclk_dom -period 4
+clock -name maxi_clk -domain maxi_dom -period 20
+reset -name presetn -value 0
+reset -name maxi_rstn -value 0

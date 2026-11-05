@@ -72,11 +72,12 @@ regress_work=$(mktemp -d /tmp/tj_ctrl_regress.XXXXXX)
 REGRESS_WORK="$regress_work" sh controller/scripts/run_regress.sh
 ```
 
-该入口运行生成物一致性、CSR、SPI、顶层展开、APB冒烟、lint、镜像工具与格式、
+该入口运行生成物一致性、CSR、SPI、顶层展开、APB冒烟、lint和CDC结构检查、镜像工具与格式、
 初始化重放、LVDS链路、SEND、RECV和BOOT检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 种子，
 `DSEEDS` 控制 SEND、RECV、BOOT 种子，默认 `default 31 166 7`；BOOT 每档时钟都运行这些种子。
 `IMAGE_CASE` 选择镜像格式检查用例，`INIT_CASE` 选择初始化回放用例；
-`SKIP_APB_SMOKE`、`SKIP_SG`、`SKIP_LNK` 可跳过对应项目。
+`SKIP_APB_SMOKE`、`SKIP_SG`、`SKIP_LNK` 可跳过对应项目。`SKIP_SG`同时跳过lint与CDC。
+CDC使用`controller/scripts/tj_ctrl.sgdc`，检查时钟为pclk=250MHz、maxi_clk=50MHz，不加载豁免文件。
 工具或用例不可用时，部分项目也会跳过，运行结果须结合日志中的跳过项查看。
 
 镜像阶段先运行 Python CLI 测试，检查地址段、比较器和各核 CONFIG，再用 SV 核对记录及内存数据。

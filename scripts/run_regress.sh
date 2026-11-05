@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run Controller regression tests and lint checks.
+# Run Controller regression tests, lint and CDC checks.
 # Usage: sh controller/scripts/run_regress.sh
 # Requires Python 3 and VCS in PATH; SpyGlass is optional.
 # REGRESS_WORK selects the output directory, which is cleared before each run.
@@ -114,11 +114,37 @@ else
   fi
 fi
 
-# SpyGlass lint.
+# Check the severity fields in a SpyGlass report.
+sg_report() {
+  sg_rpt=$(find "$1" -name moresimple.rpt 2>/dev/null | head -1)
+  if [ ! -s "$sg_rpt" ]; then
+    bad "$2 did not produce a report (see $1/run.log)"
+  elif ! sg_nerr=$(awk '
+    /^[[:space:]]*\[/ {
+      for (i = 3; i <= 4 && i <= NF; i++) {
+        severity = tolower($i)
+        if (severity == "error" || severity == "fatal" ||
+            severity == "synthesiserror" || severity == "syntaxerror") {
+          n++
+          break
+        }
+      }
+    }
+    END { print n + 0 }
+  ' "$sg_rpt"); then
+    bad "$2 report could not be read ($sg_rpt)"
+  elif [ "$sg_nerr" -gt 0 ]; then
+    bad "$2 reported $sg_nerr errors ($sg_rpt)"
+  else
+    say "    $2: 0 errors (warnings: $sg_rpt)"
+  fi
+}
+
+# SpyGlass lint and CDC structure checks.
 if [ "${SKIP_SG:-0}" = "1" ] || ! command -v spyglass >/dev/null 2>&1; then
-  say "[6/12] SpyGlass lint:跳过(SKIP_SG=1 或未装)"
+  say "[6/12] SpyGlass lint/CDC: skipped (SKIP_SG=1 or tool unavailable)"
 else
-  say "[6/12] SpyGlass lint(goal lint/lint_rtl)"
+  say "[6/12] SpyGlass lint and CDC structure checks"
   sed "s|\${TJ_CTRL_HOME}|$TJ_CTRL_HOME|g" "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
     > "$WORK/sg/expanded.f"
   cat > "$WORK/sg/tj.prj" <<EOF
@@ -126,39 +152,35 @@ else
 #!VERSION 3.0
 set_option projectwdir $WORK/sg
 set_option language_mode mixed
-# Allow synthesis of the 32768-bit SEND buffer.
 set_option mthresh 131072
 set_option enableSV09 yes
 set_option top tj_ctrl_top
 read_file -type sourcelist $WORK/sg/expanded.f
 EOF
-  if ! ( cd "$WORK/sg" && spyglass -project tj.prj -goal lint/lint_rtl -batch ) \
-    > "$WORK/sg/run.log" 2>&1; then
-    bad "SpyGlass 执行失败(见 $WORK/sg/run.log)"
+  if ( cd "$WORK/sg" && spyglass -project tj.prj -goal lint/lint_rtl -batch ) \
+       > "$WORK/sg/run.log" 2>&1; then
+    sg_report "$WORK/sg" "SpyGlass lint"
   else
-    RPT=$(find "$WORK/sg" -name moresimple.rpt 2>/dev/null | head -1)
-    # Severity is field 3 without an alias, otherwise field 4.
-    if [ ! -s "$RPT" ]; then
-      bad "SpyGlass 未产出有效报告(见 $WORK/sg/run.log)"
-    elif ! NERR=$(awk '
-      /^[[:space:]]*\[/ {
-        for (i = 3; i <= 4 && i <= NF; i++) {
-          severity = tolower($i)
-          if (severity == "error" || severity == "fatal" ||
-              severity == "synthesiserror" || severity == "syntaxerror") {
-            n++
-            break
-          }
-        }
-      }
-      END { print n + 0 }
-    ' "$RPT"); then
-      bad "SpyGlass 报告读取失败(报告:$RPT)"
-    elif [ "$NERR" -gt 0 ]; then
-      bad "SpyGlass 报 $NERR 个 Error(报告:$RPT)"
-    else
-      say "    SpyGlass lint 零 Error(告警见 $RPT)"
-    fi
+    bad "SpyGlass lint execution failed (see $WORK/sg/run.log)"
+  fi
+
+  mkdir -p "$WORK/cdc"
+  cat > "$WORK/cdc/tj_cdc.prj" <<EOF
+#!SPYGLASS_PROJECT_FILE
+#!VERSION 3.0
+set_option projectwdir $WORK/cdc
+set_option language_mode mixed
+set_option mthresh 131072
+set_option enableSV09 yes
+set_option top tj_ctrl_top
+read_file -type sourcelist $WORK/sg/expanded.f
+read_file -type sgdc $TJ_CTRL_HOME/scripts/tj_ctrl.sgdc
+EOF
+  if ( cd "$WORK/cdc" && spyglass -project tj_cdc.prj -goal cdc/cdc_verify_struct -batch ) \
+       > "$WORK/cdc/run.log" 2>&1; then
+    sg_report "$WORK/cdc" "SpyGlass CDC"
+  else
+    bad "SpyGlass CDC execution failed (see $WORK/cdc/run.log)"
   fi
 fi
 
