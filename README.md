@@ -49,7 +49,8 @@ SEND 表起始地址要求64字节对齐。RECV 按通道写入环形缓冲，Ho
 
 ## CDC 时序约束
 
-本轮 Intel FPGA 交付使用 Quartus TimeQuest 约束。Synopsys 和 Vivado 文件供参考。
+目标 FPGA 为 Intel Agilex 7 I-Series 的 `AGIB041R29D1E2VB` 或 `AGIB041R29D1E2VC`，两种型号共用 Quartus Prime Pro 的 TimeQuest 约束。
+本次 Agilex 7 时序验证采用 `AGIB041R29D1E2VB` 的布线网表。Synopsys 和 Vivado 文件供参考。
 先定义 `pclk` 和 `maxi_clk`，再从 `scripts/` 加载所选工具对应的六组约束。
 
 | 工具 | 公共约束 | 五组配套文件的命名 |
