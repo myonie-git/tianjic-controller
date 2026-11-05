@@ -66,7 +66,7 @@ fi
 # SPI tests across seeds.
 say "[3/12] SPI 陪练 TB × 种子集 [$SEEDS]"
 ( cd "$WORK/spi" && \
-  vlogan -full64 -sverilog -nc -timescale=1ns/1ps \
+  vlogan -full64 -sverilog -nc +define+TJ_ASSERT_ON -timescale=1ns/1ps \
     "$TJ_CTRL_HOME/rtl/pkg/tj_ctrl_pkg.sv" \
     "$TJ_CTRL_HOME/rtl/csr/tj_ctrl_csr_pkg.sv" \
     "$TJ_CTRL_HOME/rtl/spi/tj_spi_engine.sv" \
@@ -225,7 +225,7 @@ else
     python3 "$TJ_CTRL_HOME/sw/tj_image.py" export "$INIT_CASE" \
       -o "$WORK/init/image" && \
     cd "$WORK/init" && \
-    vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
+    vlogan -full64 -sverilog -nc +define+TJ_ASSERT_ON -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
       "$YAWING_DESIGN/rtl/mcu_subsys/spi/spi2ahb.v" \
       "$TJ_CTRL_HOME/tb/init/tb_tj_init_replay.sv" && \
     vcs -full64 -nc tb_tj_init_replay -o simv && \
@@ -257,9 +257,10 @@ data_runs() {
   data_dir=$1
   data_name=$2
   data_label=$3
-  shift 3
+  data_seeds=$4
+  shift 4
   data_first=1
-  for data_seed in $DSEEDS; do
+  for data_seed in $data_seeds; do
     data_arg=""
     [ "$data_seed" = "default" ] || data_arg="+ntb_random_seed=$data_seed"
     if [ "$data_first" -eq 1 ]; then
@@ -289,7 +290,8 @@ if ( cd "$WORK/send" && \
     "$TJ_CTRL_HOME/tb/send/tb_tj_send.sv" && \
   vcs -full64 -nc tb_tj_send -o simv ) > "$WORK/send/build.log" 2>&1 &&
   log_clean "$WORK/send/build.log"; then
-  data_runs "$WORK/send" "SEND TB" run $IMG_ARG
+  data_runs "$WORK/send" "SEND TB" run "$DSEEDS" $IMG_ARG
+  data_runs "$WORK/send" "SEND TB" run_delivery default +TJ_PCLK_HP=2.0 +TJ_MAXI_HP=10.0
 else
   bad "SEND TB build failed (see $WORK/send/build.log)"
 fi
@@ -303,7 +305,7 @@ if ( cd "$WORK/recv" && \
     "$TJ_CTRL_HOME/tb/recv/tb_tj_recv.sv" && \
   vcs -full64 -nc tb_tj_recv -o simv ) > "$WORK/recv/build.log" 2>&1 &&
   log_clean "$WORK/recv/build.log"; then
-  data_runs "$WORK/recv" "RECV TB" run
+  data_runs "$WORK/recv" "RECV TB" run "$DSEEDS"
 else
   bad "RECV TB build failed (see $WORK/recv/build.log)"
 fi
@@ -312,14 +314,14 @@ fi
 say "[12/12] BOOT engine test"
 mkdir -p "$WORK/boot"
 if ( cd "$WORK/boot" && \
-  vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
+  vlogan -full64 -sverilog -nc +define+TJ_ASSERT_ON -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
     "$YAWING_DESIGN/rtl/mcu_subsys/spi/spi2ahb.v" \
     "$TJ_CTRL_HOME/tb/boot/tb_tj_boot.sv" && \
   vcs -full64 -nc tb_tj_boot -o simv ) > "$WORK/boot/build.log" 2>&1 &&
   log_clean "$WORK/boot/build.log"; then
-  data_runs "$WORK/boot" "BOOT TB" run          +TJ_PCLK_HP=5.0  +TJ_MAXI_HP=1.2
-  data_runs "$WORK/boot" "BOOT TB" run_delivery +TJ_PCLK_HP=2.0  +TJ_MAXI_HP=10.0
-  data_runs "$WORK/boot" "BOOT TB" run_boundary +TJ_PCLK_HP=50.0 +TJ_MAXI_HP=5.0
+  data_runs "$WORK/boot" "BOOT TB" run          "$DSEEDS" +TJ_PCLK_HP=5.0  +TJ_MAXI_HP=1.2
+  data_runs "$WORK/boot" "BOOT TB" run_delivery "$DSEEDS" +TJ_PCLK_HP=2.0  +TJ_MAXI_HP=10.0
+  data_runs "$WORK/boot" "BOOT TB" run_boundary "$DSEEDS" +TJ_PCLK_HP=50.0 +TJ_MAXI_HP=5.0
 else
   bad "BOOT TB build failed (see $WORK/boot/build.log)"
 fi
