@@ -461,10 +461,12 @@ module tb_tj_ctrl_chip;
   // Match the injected data packet by content, even when other packets arrive first.
   logic [127:0] last_bounce_rec;
   task automatic bounce_pkt(input logic [63:0] body, output int hit);
-    logic [31:0] next_rec[3], wp_now;
+    logic [31:0] first_rec[3], next_rec[3], wp_now;
     logic [127:0] r;
-    for (int c = 0; c < 3; c++)
+    for (int c = 0; c < 3; c++) begin
       apb_rd(16'h1000 + 16'(c)*16'h40 + 16'h18, next_rec[c]);
+      first_rec[c] = next_rec[c];
+    end
     ddr[(64'h0000_1800_0000 >> 4)] =
       {16'hD0D0, 8'h01, 8'h00, body, 14'h0, 6'b100000, 6'h0, 2'b00, 4'b0010};
     send_table(48'h0000_1800_0000, 1, 2000);
@@ -485,6 +487,11 @@ module tb_tj_ctrl_chip;
         end
         if (hit >= 0) break;
       end
+    end
+    if (hit < 0) begin
+      for (int c = 0; c < 3; c++)
+        $display("CTRL CHIP TB: body=%016h not found in ring %0d, scanned [%0d,%0d)",
+                 body, c, first_rec[c], next_rec[c]);
     end
   endtask
 
