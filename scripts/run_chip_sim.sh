@@ -16,6 +16,9 @@ if [ "${BOOTSPI:-0}" = "1" ] && [ ! -f "$CASE/lvds_config.txt" ]; then
 fi
 HERE=$(cd "$(dirname "$0")" && pwd) || exit 1
 ENTRY_REPO=$(dirname "$(dirname "$HERE")")
+if [ -f "$HERE/.tj_batch_entry_repo" ]; then
+  IFS= read -r ENTRY_REPO < "$HERE/.tj_batch_entry_repo" || exit 1
+fi
 REPO=${TJ_REPO:-$ENTRY_REPO}
 REPO=$(cd "$REPO" && pwd) || exit 1
 TJ_CTRL_HOME=$(cd "${TJ_CTRL_HOME:-$ENTRY_REPO/controller}" && pwd) || exit 1

@@ -6,8 +6,15 @@
 # Each batch keeps separate logs under TMPDIR (default: /tmp).
 set -u
 ROOT=/data_8T_2/Tianjic/all_cases
-HERE=$(cd "$(dirname "$0")" && pwd)
-LOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/tj_chip_sim_batch.XXXXXX") || exit 1
+HERE=$(cd "$(dirname "$0")" && pwd) || exit 1
+# Run all cases with the same two scripts.
+if [ ! -f "$HERE/.tj_batch_entry_repo" ]; then
+  LOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/tj_chip_sim_batch.XXXXXX") || exit 1
+  cp "$HERE/run_chip_sim_batch.sh" "$HERE/run_chip_sim.sh" "$LOG_DIR/" || exit 1
+  dirname "$(dirname "$HERE")" > "$LOG_DIR/.tj_batch_entry_repo" || exit 1
+  exec sh "$LOG_DIR/run_chip_sim_batch.sh" "$@"
+fi
+LOG_DIR=$HERE
 printf '== Chip simulation logs: %s\n' "$LOG_DIR"
 
 CASES="
