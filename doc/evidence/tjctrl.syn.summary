@@ -1,0 +1,9 @@
+Synthesis Status : Successful - Wed Aug 12 17:06:04 2026
+Revision Name : tjctrl
+Top-level Entity Name : tj_ctrl_top
+Family : Cyclone 10 GX
+Quartus Prime Version : 24.3.0 Build 212 11/18/2024 SC Pro Edition
+Device : 10CX220YF672E5G
+Logic utilization estimate (in ALMs) : 6,574 / 80,330 ( 8 % )
+Total registers : 9851
+Estimated DSP Blocks Post-Merging : 0

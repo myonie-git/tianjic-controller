@@ -20,3 +20,18 @@
 SpyGlass 回归将 `mthresh` 设为 131072，使该 32768 位阵列参与 lint 和 CDC 分析。
 早期 Design Compiler U-2022.12-SP3 的通用标准单元试编将阵列映射为触发器，`u_fetch` 占当次顶层面积约 72.7%。
 这个比例描述的是该次标准单元映射；Intel FPGA 上的存储资源见上表。
+
+## Quartus 块级构建
+
+从仓库根目录运行以下命令，默认在 `/data_8T_2/$USER/work/quartus-ooc/` 下为本次构建新建一个 `tjctrl-XXXXXX` 目录。
+脚本会打印实际路径。也可以传入一个新目录或空目录。如果指定的目录已有内容，脚本会退出并保留原文件。
+
+```sh
+sh controller/scripts/run_quartus_ooc.sh
+```
+
+默认目标为 Cyclone 10 GX `10CX220YF672E5G`，顶层端口使用虚拟引脚。`FAM` 和 `DEV` 选择器件，
+`PCLK_NS` 和 `MAXI_NS` 设置两个时钟周期，默认分别为 4 ns 和 10 ns。交付档使用 `MAXI_NS=20`。
+
+2026-08-12 的 Cyclone 10 GX 块级工程按 250/100 MHz 运行。该次 `tjctrl` 工程原始摘要：
+[综合](evidence/tjctrl.syn.summary)、[资源](evidence/tjctrl.fit.summary)、[时序](evidence/tjctrl.sta.summary)。

@@ -81,6 +81,9 @@ BOOT 在 `maxi_clk` 收到请求时锁存 64 字节对齐的块地址。`boot_fe
 本次 Cyclone 10 GX 实现覆盖三档时钟，布线时采用 2.4 ns 地址预算和 0.30 ns 的
 `TJ_BOOT_FIT_HOLD_MARGIN`。签核时取消这个布线裕量，按实际 `maxi_clk` 周期检查建立和保持。
 
+在同一 Cyclone 10 GX 器件上，OOC 脚本将 RECV 读指针的布线最小延迟设为 0.30 ns
+（`TJ_RECV_RPTR_FIT_HOLD_MARGIN`）。最终时序分析使用 0 ns 最小延迟和一个 `maxi_clk` 周期的最大延迟。
+
 ## 工具与测试入口
 
 以下命令从仓库根目录执行，Shell 示例采用 sh/bash 语法。

@@ -1,0 +1,45 @@
+------------------------------------------------------------
+Timing Analyzer Summary
+------------------------------------------------------------
+
+Type  : Setup 'pclk'
+Slack : 0.492
+TNS   : 0.000
+Corner: Slow 900mV 100C Model
+
+Type  : Setup 'maxi_clk'
+Slack : 2.483
+TNS   : 0.000
+Corner: Slow 900mV 100C Model
+
+Type  : Setup 'n/a'
+Slack : 4.817
+TNS   : 0.000
+Corner: Slow 900mV 100C Model
+
+Type  : Hold 'pclk'
+Slack : 0.017
+TNS   : 0.000
+Corner: Fast 900mV 0C Model
+
+Type  : Hold 'maxi_clk'
+Slack : 0.018
+TNS   : 0.000
+Corner: Fast 900mV 0C Model
+
+Type  : Hold 'n/a'
+Slack : 2.091
+TNS   : 0.000
+Corner: Fast 900mV 0C Model
+
+Type  : Minimum Pulse Width 'pclk'
+Slack : 1.854
+TNS   : 0.000
+Corner: Slow 900mV 0C Model
+
+Type  : Minimum Pulse Width 'maxi_clk'
+Slack : 4.596
+TNS   : 0.000
+Corner: Slow 900mV 100C Model
+
+------------------------------------------------------------
