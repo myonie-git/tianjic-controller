@@ -40,5 +40,5 @@ FAM="Agilex 7" DEV=AGIB041R29D1E2VB PCLK_NS=4.0 MAXI_NS=20.0 \
   sh controller/scripts/run_quartus_ooc.sh
 ```
 
-2026-08-12 的 Cyclone 10 GX 块级工程按 250/100 MHz 运行。该次 `tjctrl` 工程原始摘要：
-[综合](evidence/tjctrl.syn.summary)、[资源](evidence/tjctrl.fit.summary)、[时序](evidence/tjctrl.sta.summary)。
+2026-08-12 的 Agilex 7 和 Cyclone 10 GX 块级工程均按 250/100 MHz 运行。
+两款器件的综合、资源和时序摘要见[历史 Quartus 报告](evidence/README.md)。

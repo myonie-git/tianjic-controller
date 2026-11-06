@@ -1,0 +1,45 @@
+------------------------------------------------------------
+Timing Analyzer Summary
+------------------------------------------------------------
+
+Type  : Setup 'pclk'
+Slack : 1.363
+TNS   : 0.000
+Corner: Slow vid2 100C Model
+
+Type  : Setup 'maxi_clk'
+Slack : 4.999
+TNS   : 0.000
+Corner: Slow vid2 100C Model
+
+Type  : Setup 'n/a'
+Slack : 7.588
+TNS   : 0.000
+Corner: Slow vid2 100C Model
+
+Type  : Hold 'pclk'
+Slack : 0.000
+TNS   : 0.000
+Corner: Fast vid2 100C Model
+
+Type  : Hold 'maxi_clk'
+Slack : 0.049
+TNS   : 0.000
+Corner: Fast vid2 100C Model
+
+Type  : Hold 'n/a'
+Slack : 1.158
+TNS   : 0.000
+Corner: Fast vid2a 0C Model
+
+Type  : Minimum Pulse Width 'pclk'
+Slack : 1.717
+TNS   : 0.000
+Corner: Slow vid2 100C Model
+
+Type  : Minimum Pulse Width 'maxi_clk'
+Slack : 4.609
+TNS   : 0.000
+Corner: Slow vid2 100C Model
+
+------------------------------------------------------------

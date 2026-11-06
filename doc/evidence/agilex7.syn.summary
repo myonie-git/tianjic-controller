@@ -1,0 +1,9 @@
+Synthesis Status : Successful - Wed Aug 12 20:16:43 2026
+Revision Name : tjctrl
+Top-level Entity Name : tj_ctrl_top
+Family : Agilex 7
+Quartus Prime Version : 24.3.0 Build 212 11/18/2024 SC Pro Edition
+Device : AGIB041R29D1E2VB
+Logic utilization estimate (in ALMs) : 6,773 / 1,356,160 ( < 1 % )
+Total dedicated logic registers : 9754
+Estimated DSP Blocks Post-Merging : 0
