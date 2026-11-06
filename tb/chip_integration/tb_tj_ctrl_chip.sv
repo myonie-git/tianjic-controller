@@ -163,6 +163,7 @@ module tb_tj_ctrl_chip;
   localparam longint unsigned RING_BASE = 64'h0000_2000_0000;
   localparam int unsigned RING_RECS = 1024;
   logic [127:0] ddr [longint unsigned];
+  logic [7:0] img_b [0:(1<<22)-1];
   typedef struct { logic [47:0] addr; logic [7:0] len; logic [3:0] id; } ar_t;
   typedef struct { logic [47:0] addr; logic [3:0] id; } aw_t;
   ar_t arq[$];
@@ -699,7 +700,6 @@ module tb_tj_ctrl_chip;
   int comparisons = 0;
   int fd, code, gy, gx, n_rec;
   logic [31:0] rdat, d_v;
-  logic [7:0] img_b [0:(1<<22)-1];
   bit lvds_mode;
 
   initial begin
