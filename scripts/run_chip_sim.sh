@@ -7,6 +7,7 @@
 # BOOTSPI=1 selects BOOT loading in single-die LVDS cases.
 # SKIP_BUILD=1 reuses the JOBNAME build; rebuild after source changes.
 # LVDS_EXTRA_TESTS=1 enables dx=-32 and link-error tests in LVDS mode.
+# TJ_EXTRA appends simulation plusargs.
 set -u
 CASE=${1:-/data_8T_2/Tianjic/all_cases/core_array/ann_sparse}
 CASE=$(cd "$CASE" && pwd) || exit 1
@@ -79,6 +80,7 @@ cd "$RUN" || exit 1
 SPECIAL_ARGS=""
 [ "${LVDS_EXTRA_TESTS:-0}" = "1" ] && SPECIAL_ARGS="+TJ_ECCTEST +TJ_DXTEST"
 [ "${BOOTSPI:-0}" = "1" ] && SPECIAL_ARGS="$SPECIAL_ARGS +TJ_BOOTSPI"
+[ -n "${TJ_EXTRA:-}" ] && SPECIAL_ARGS="$SPECIAL_ARGS $TJ_EXTRA"
 if [ -f "$CASE/lvds_config.txt" ]; then
   # LVDS output is compared as a complete packet stream.
   NOUT=$(grep -c '^@' "$CASE/lvds_golden.txt") || exit 1
@@ -98,7 +100,7 @@ else
     +UVM_MAX_QUIT_COUNT=10000 -l dielevel.log +use_tj_ctrl \
     +TJ_PY="$TJ_CTRL_HOME/sw/tj_image.py" \
     +TJ_CASE="$CASE" \
-    +TJ_REGS=image/init_regs.txt +ntb_random_seed=888
+    +TJ_REGS=image/init_regs.txt $SPECIAL_ARGS +ntb_random_seed=888
   SIM_RC=$?
 fi
 

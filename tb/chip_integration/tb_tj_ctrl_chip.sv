@@ -160,6 +160,7 @@ module tb_tj_ctrl_chip;
 
   // AXI memory model: SEND image and three RECV rings, spaced 1 MiB apart.
   localparam longint unsigned IMG_BASE  = 64'h0000_1000_0000;
+  localparam longint unsigned IMG2_BASE = 64'h0000_1800_0000; // 64-byte aligned batch buffer.
   localparam longint unsigned RING_BASE = 64'h0000_2000_0000;
   localparam int unsigned RING_RECS = 1024;
   logic [127:0] ddr [longint unsigned];
@@ -242,16 +243,20 @@ module tb_tj_ctrl_chip;
     end
   end
 
-  // Host APB accesses.
+  // Serialize APB transactions from the main sequence and receive consumer.
+  semaphore apb_sem = new(1);
   task automatic apb_wr(input [15:0] a, input [31:0] d);
+    apb_sem.get(1);
     @(posedge pclk); psel <= 1; penable <= 0; pwrite <= 1; paddr <= a; pwdata <= d;
     @(posedge pclk); penable <= 1;
     @(posedge pclk); while (!pready) @(posedge pclk);
     chk(pready === 1'b1, $sformatf("APB write PREADY at %04h", a));
     chk(pslverr === 1'b0, $sformatf("APB write PSLVERR at %04h", a));
     psel <= 0; penable <= 0; @(posedge pclk);
+    apb_sem.put(1);
   endtask
   task automatic apb_rd(input [15:0] a, output [31:0] d);
+    apb_sem.get(1);
     @(posedge pclk); psel <= 1; penable <= 0; pwrite <= 0; paddr <= a;
     @(posedge pclk); penable <= 1;
     @(posedge pclk); while (!pready) @(posedge pclk);
@@ -259,7 +264,111 @@ module tb_tj_ctrl_chip;
     chk(pready === 1'b1, $sformatf("APB read PREADY at %04h", a));
     chk(pslverr === 1'b0, $sformatf("APB read PSLVERR at %04h", a));
     psel <= 0; penable <= 0; @(posedge pclk);
+    apb_sem.put(1);
   endtask
+
+  // Optional chip-side counters and receive-state trace for the 2x2 array.
+`ifdef TJ_MULTI_DIE
+`ifndef TJ_MULTI_DIE_4X1
+  int unsigned pc_w_in [2][2], pc_w_out [2][2];
+  int unsigned pc_e_out[2][2], pc_e_in  [2][2];
+  int unsigned pc_s_out[2][2], pc_n_in  [2][2];
+  int unsigned pc_w00_lane [3];
+  generate
+    for (genvar gr = 0; gr < 2; gr++) begin : g_pcr
+      for (genvar gc = 0; gc < 2; gc++) begin : g_pcc
+        always @(posedge `TJD(gr,gc).u_w__lvds_subs.axis_brg_clk) begin
+          if (`TJD(gr,gc).u_w__lvds_subs.m0_axis_tvalid && `TJD(gr,gc).u_w__lvds_subs.m0_axis_tready) pc_w_in[gr][gc]++;
+          if (`TJD(gr,gc).u_w__lvds_subs.m1_axis_tvalid && `TJD(gr,gc).u_w__lvds_subs.m1_axis_tready) pc_w_in[gr][gc]++;
+          if (`TJD(gr,gc).u_w__lvds_subs.m2_axis_tvalid && `TJD(gr,gc).u_w__lvds_subs.m2_axis_tready) pc_w_in[gr][gc]++;
+          if (`TJD(gr,gc).u_w__lvds_subs.s0_axis_tvalid && `TJD(gr,gc).u_w__lvds_subs.s0_axis_tready) pc_w_out[gr][gc]++;
+          if (`TJD(gr,gc).u_w__lvds_subs.s1_axis_tvalid && `TJD(gr,gc).u_w__lvds_subs.s1_axis_tready) pc_w_out[gr][gc]++;
+          if (`TJD(gr,gc).u_w__lvds_subs.s2_axis_tvalid && `TJD(gr,gc).u_w__lvds_subs.s2_axis_tready) pc_w_out[gr][gc]++;
+        end
+        always @(posedge `TJD(gr,gc).u_e__lvds_subs.axis_brg_clk) begin
+          if (`TJD(gr,gc).u_e__lvds_subs.s0_axis_tvalid && `TJD(gr,gc).u_e__lvds_subs.s0_axis_tready) pc_e_out[gr][gc]++;
+          if (`TJD(gr,gc).u_e__lvds_subs.s1_axis_tvalid && `TJD(gr,gc).u_e__lvds_subs.s1_axis_tready) pc_e_out[gr][gc]++;
+          if (`TJD(gr,gc).u_e__lvds_subs.s2_axis_tvalid && `TJD(gr,gc).u_e__lvds_subs.s2_axis_tready) pc_e_out[gr][gc]++;
+          if (`TJD(gr,gc).u_e__lvds_subs.m0_axis_tvalid && `TJD(gr,gc).u_e__lvds_subs.m0_axis_tready) pc_e_in[gr][gc]++;
+          if (`TJD(gr,gc).u_e__lvds_subs.m1_axis_tvalid && `TJD(gr,gc).u_e__lvds_subs.m1_axis_tready) pc_e_in[gr][gc]++;
+          if (`TJD(gr,gc).u_e__lvds_subs.m2_axis_tvalid && `TJD(gr,gc).u_e__lvds_subs.m2_axis_tready) pc_e_in[gr][gc]++;
+        end
+        always @(posedge `TJD(gr,gc).u_s__lvds_subs.axis_brg_clk) begin
+          if (`TJD(gr,gc).u_s__lvds_subs.s0_axis_tvalid && `TJD(gr,gc).u_s__lvds_subs.s0_axis_tready) pc_s_out[gr][gc]++;
+          if (`TJD(gr,gc).u_s__lvds_subs.s1_axis_tvalid && `TJD(gr,gc).u_s__lvds_subs.s1_axis_tready) pc_s_out[gr][gc]++;
+          if (`TJD(gr,gc).u_s__lvds_subs.s2_axis_tvalid && `TJD(gr,gc).u_s__lvds_subs.s2_axis_tready) pc_s_out[gr][gc]++;
+        end
+        always @(posedge `TJD(gr,gc).u_n__lvds_subs.axis_brg_clk) begin
+          if (`TJD(gr,gc).u_n__lvds_subs.m0_axis_tvalid && `TJD(gr,gc).u_n__lvds_subs.m0_axis_tready) pc_n_in[gr][gc]++;
+          if (`TJD(gr,gc).u_n__lvds_subs.m1_axis_tvalid && `TJD(gr,gc).u_n__lvds_subs.m1_axis_tready) pc_n_in[gr][gc]++;
+          if (`TJD(gr,gc).u_n__lvds_subs.m2_axis_tvalid && `TJD(gr,gc).u_n__lvds_subs.m2_axis_tready) pc_n_in[gr][gc]++;
+        end
+      end
+    end
+    always @(posedge `TJD(0,0).u_w__lvds_subs.axis_brg_clk) begin
+      if (`TJD(0,0).u_w__lvds_subs.m0_axis_tvalid && `TJD(0,0).u_w__lvds_subs.m0_axis_tready) pc_w00_lane[0]++;
+      if (`TJD(0,0).u_w__lvds_subs.m1_axis_tvalid && `TJD(0,0).u_w__lvds_subs.m1_axis_tready) pc_w00_lane[1]++;
+      if (`TJD(0,0).u_w__lvds_subs.m2_axis_tvalid && `TJD(0,0).u_w__lvds_subs.m2_axis_tready) pc_w00_lane[2]++;
+    end
+  endgenerate
+`endif
+`endif
+
+`ifdef TJ_MULTI_DIE
+`ifndef TJ_MULTI_DIE_4X1
+  `define R02 `TJD(0,0).u_cores_wrapper_top.gen_array_row[0].gen_array_column[1].u_array.gen_core_rows[0].gen_core_columns[0].u_core.router_unit
+`endif
+`endif
+  function automatic string r02_str();
+    string s;
+    s = "";
+`ifdef TJ_MULTI_DIE
+`ifndef TJ_MULTI_DIE_4X1
+    s = $sformatf(" | R02[busy=%0d rcv=%0d end=%0d/num%0d data=%0d/exp%0d st=%0d mode=%h sbusy=%0d]",
+      `R02.u_RecvController.recv_busy, `R02.u_RecvController.receiving,
+      `R02.u_RecvController.recv_end_cnt, `R02.u_RecvController.recv_end_num,
+      `R02.u_RecvController.recv_data_cnt, `R02.u_RecvController.recv_expect_data_cnt,
+      `R02.u_RecvController.recv_state_cnt, `R02.u_RecvController.router_recv_mode_code,
+      `R02.send_busy);
+`endif
+`endif
+    return s;
+  endfunction
+
+`ifdef TJ_MULTI_DIE
+`ifndef TJ_MULTI_DIE_4X1
+  int r02_evt_n = 0;
+  initial begin
+    if ($test$plusargs("TJ_PROBE")) begin
+      forever begin
+        @(`R02.u_RecvController.recv_end_cnt or `R02.u_RecvController.recv_expect_data_cnt
+          or `R02.u_RecvController.recv_busy or `R02.u_RecvController.receiving
+          or `R02.u_RecvController.recv_state_cnt);
+        if (r02_evt_n < 400) begin
+          $display("CTRL CHIP TB: R02 transition @%0t%s", $time, r02_str());
+          $fflush();
+        end else if (r02_evt_n == 400) $display("CTRL CHIP TB: R02 trace limit reached");
+        r02_evt_n++;
+      end
+    end
+  end
+`endif
+`endif
+
+  function automatic string pcnt_str();
+    string s;
+    s = "";
+`ifdef TJ_MULTI_DIE
+`ifndef TJ_MULTI_DIE_4X1
+    s = $sformatf(" | links d00[W_in=%0d(lanes%0d/%0d/%0d) E_out=%0d E_in=%0d W_out=%0d S_out=%0d] d01[W_in=%0d W_out=%0d S_out=%0d] d10[N_in=%0d W_in=%0d] d11[N_in=%0d W_in=%0d]",
+      pc_w_in[0][0], pc_w00_lane[0], pc_w00_lane[1], pc_w00_lane[2],
+      pc_e_out[0][0], pc_e_in[0][0], pc_w_out[0][0], pc_s_out[0][0],
+      pc_w_in[0][1], pc_w_out[0][1], pc_s_out[0][1],
+      pc_n_in[1][0], pc_w_in[1][0], pc_n_in[1][1], pc_w_in[1][1]);
+`endif
+`endif
+    return s;
+  endfunction
 
   logic [19:0] cur_offs = 20'hFFFFF;
   task automatic win_access(input bit wr, input [31:0] a, inout [31:0] d);
@@ -459,6 +568,52 @@ module tb_tj_ctrl_chip;
     apb_wr(16'h0C10, 32'h300);
   endtask
 
+  // Split at FENCE records and use a 64-byte aligned DDR buffer for each batch.
+  task automatic send_image(input int n_rec);
+    int seg_lo, seg_n, sent_tot, segments;
+    bit is_fence;
+    seg_lo = 0;
+    sent_tot = 0;
+    segments = 0;
+    for (int i = 0; i < n_rec; i++) begin
+      is_fence = img_b[i * 16 + 13][1] && !$test$plusargs("TJ_NOSEGDB");
+      if (is_fence || i == n_rec - 1) begin
+        for (int half = 0; half < 2; half++) begin
+          int lo, hi;
+          if (is_fence && half == 0) begin
+            lo = seg_lo;
+            hi = i - 1;
+          end else if (is_fence) begin
+            lo = i;
+            hi = i;
+          end else if (half == 0) begin
+            lo = seg_lo;
+            hi = i;
+          end else continue;
+          if (hi < lo) continue;
+          seg_n = hi - lo + 1;
+          for (int k = 0; k < seg_n; k++)
+            ddr[(IMG2_BASE >> 4) + longint'(k)] =
+              ddr[(IMG_BASE >> 4) + longint'(lo) + longint'(k)];
+          send_table(IMG2_BASE[47:0], seg_n, 40000);
+          sent_tot += seg_n;
+          segments++;
+          // Drain the native link and core path before the next batch.
+          repeat (seg_n + 1000) @(posedge pclk);
+        end
+        seg_lo = i + 1;
+      end
+    end
+    $display("CTRL CHIP TB: Sent %0d records in %0d batches @%0t%s",
+             sent_tot, segments, $time, pcnt_str());
+    begin
+      int cooldown_us;
+      cooldown_us = 0;
+      void'($value$plusargs("TJ_FLOOD_COOLDOWN_US=%d", cooldown_us));
+      if (cooldown_us > 0) #(cooldown_us * 1us);
+    end
+  endtask
+
   // Match the injected data packet by content, even when other packets arrive first.
   logic [127:0] last_bounce_rec;
   task automatic bounce_pkt(input logic [63:0] body, output int hit);
@@ -610,6 +765,7 @@ module tb_tj_ctrl_chip;
   endfunction
 
   int n_w, n_p, n_r, n_f, n_d;
+  int cur_sel = -1;
   task automatic replay_regs(input string path, input bit lvds_mode, input int n_rec);
     int fd, code, line_no;
     string line, op, extra;
@@ -625,6 +781,11 @@ module tb_tj_ctrl_chip;
         "W": begin
           code = $sscanf(line, "%s %h %h %s", op, a_v, d_v, extra);
           if (code != 3) $fatal(1, "%s:%0d: expected W address data", path, line_no);
+          if (a_v == 32'h02FFF00C) cur_sel = int'(d_v);
+          if ($test$plusargs("TJ_NOSLEEP") && d_v == 32'h0000211F
+              && (a_v == 32'h01160004 || a_v == 32'h01160024
+                  || a_v == 32'h01160044 || a_v == 32'h01160064))
+            d_v = 32'h0000210F;
           win_access(1'b1, a_v, d_v);
           n_w++;
         end
@@ -643,12 +804,25 @@ module tb_tj_ctrl_chip;
           n_r++;
         end
         "P": begin
+          int p_max, pi;
           code = $sscanf(line, "%s %h %h %h %s", op, a_v, m_v, v_v, extra);
           if (code != 4) $fatal(1, "%s:%0d: expected P address mask value", path, line_no);
-          for (int i = 0; i < 400; i++) begin
+          p_max = 400;
+          void'($value$plusargs("TJ_P_MAX=%d", p_max));
+          if ($test$plusargs("TJ_PROBE"))
+            $display("CTRL CHIP TB: Poll %08h core=%0d start @%0t", a_v, cur_sel, $time);
+          for (pi = 0; pi < p_max; pi++) begin
             core_read(a_v, rdat);
             if ((rdat & m_v) === v_v) break;
+            if ($test$plusargs("TJ_PROBE") && pi % 25 == 24) begin
+              $display("CTRL CHIP TB: Poll %08h iteration=%0d data=%08h core=%0d @%0t%s%s",
+                       a_v, pi + 1, rdat, cur_sel, $time, pcnt_str(), r02_str());
+              $fflush();
+            end
           end
+          if ($test$plusargs("TJ_PROBE"))
+            $display("CTRL CHIP TB: Poll %08h iterations=%0d matched=%0d @%0t",
+                     a_v, pi, ((rdat & m_v) === v_v), $time);
           chk((rdat & m_v) === v_v,
               $sformatf("Poll %08h: %08h & %08h != %08h", a_v, rdat, m_v, v_v));
           n_p++;
@@ -662,7 +836,7 @@ module tb_tj_ctrl_chip;
           code = $sscanf(line, "%s %h %h %s", op, a_v, d_v, extra);
           if (code != 3) $fatal(1, "%s:%0d: expected F argument argument", path, line_no);
           if (!lvds_mode) $fatal(1, "F requires LVDS mode");
-          send_table(IMG_BASE[47:0], n_rec, 20000);
+          send_image(n_rec);
           n_f++;
         end
         default: $fatal(1, "%s:%0d: unsupported command %s", path, line_no, op);
@@ -701,6 +875,9 @@ module tb_tj_ctrl_chip;
   int fd, code, gy, gx, n_rec;
   logic [31:0] rdat, d_v;
   bit lvds_mode;
+  bit recv_on;
+  int recv_output_fd, recv_data_count;
+  logic [31:0] recv_next_rec[3];
 
   initial begin
     psel = 0; penable = 0; pwrite = 0; paddr = '0; pwdata = '0;
@@ -893,11 +1070,13 @@ module tb_tj_ctrl_chip;
 
     // Configure the FPGA-side link model and SEND routing.
     if (lvds_mode) begin
+      logic [31:0] link_params;
+      link_params = $test$plusargs("TJ_NOSLEEP") ? 32'h210F : 32'h211F;
       chk(fpga_idn === 2'd1, "FPGA link instance ID propagation");
-      cc_write(25'h04, 32'h211F);                   // Link group parameters.
-      cc_write(25'h24, 32'h211F);
-      cc_write(25'h44, 32'h211F);
-      cc_write(25'h00, 32'h4);                      // Enable parallel TX/RX and all-to-all mode.
+      cc_write(25'h04, link_params);
+      cc_write(25'h24, link_params);
+      cc_write(25'h44, link_params);
+      cc_write(25'h00, $test$plusargs("TJ_ONE2ONE") ? 32'h0 : 32'h4);
       cc_write(25'h200, 32'h0);                     // Unmask link errors.
       #6us;                                         // Allow link startup to settle.
       cc_read(25'h204, rdat);
@@ -916,6 +1095,27 @@ module tb_tj_ctrl_chip;
         apb_wr(16'h1000 + 16'(c) * 16'h40 + 16'h0C, 32'h100);
         apb_wr(16'h1000 + 16'(c) * 16'h40 + 16'h10, 32'h3);   // Receive enabled; backpressure when full.
       end
+      // Consume rings while command replay waits for chip completion.
+      recv_data_count = 0;
+      foreach (recv_next_rec[c]) recv_next_rec[c] = 0;
+      if (!$value$plusargs("TJ_OUT=%s", out_p)) out_p = "lvds_outputs.txt";
+      recv_output_fd = $fopen(out_p, "w");
+      if (recv_output_fd == 0) $fatal(1, "cannot open %s", out_p);
+      recv_on = 1;
+      fork begin
+        int sweeps;
+        sweeps = 0;
+        while (recv_on) begin
+          collect_output(recv_output_fd, recv_next_rec, recv_data_count);
+          repeat (200) @(posedge pclk);
+          sweeps++;
+          if ($test$plusargs("TJ_PROBE") && sweeps % 256 == 0) begin
+            $display("CTRL CHIP TB: Receive progress=%0d RPTR0=%0d @%0t%s",
+                     recv_data_count, recv_next_rec[0], $time, pcnt_str());
+            $fflush();
+          end
+        end
+      end join_none
     end
 
     // Execute initialization commands, including SEND markers in LVDS mode.
@@ -936,27 +1136,27 @@ module tb_tj_ctrl_chip;
 
     // Compare actual outputs, using packet or final-memory semantics as appropriate.
     if (lvds_mode) begin
-      int n_out, n_data, ofd;
-      logic [31:0] next_rec[3];
+      int n_out;
       n_out = 4;
       void'($value$plusargs("TJ_NOUT=%d", n_out));
       if (n_out <= 0) $fatal(1, "TJ_NOUT must be positive");
-      n_data = 0;
-      foreach (next_rec[c]) next_rec[c] = 0;
-      if (!$value$plusargs("TJ_OUT=%s", out_p)) out_p = "lvds_outputs.txt";
-      ofd = $fopen(out_p, "w");
-      if (ofd == 0) $fatal(1, "cannot open %s", out_p);
-      for (int t = 0; t < 12000 && n_data < n_out; t++)
-        collect_output(ofd, next_rec, n_data);
+      for (int t = 0; t < 12000 && recv_data_count < n_out; t++)
+        repeat (200) @(posedge pclk);
+      recv_on = 0;
+      // The consumer finishes its current sweep before the final drain.
       repeat (400) @(posedge pclk);
-      collect_output(ofd, next_rec, n_data);
-      $fclose(ofd);
-      chk(n_data == n_out, $sformatf("Received %0d data packets, expected %0d", n_data, n_out));
+      for (int k = 0; k < 8; k++) begin
+        repeat (400) @(posedge pclk);
+        collect_output(recv_output_fd, recv_next_rec, recv_data_count);
+      end
+      $fclose(recv_output_fd);
+      chk(recv_data_count == n_out,
+          $sformatf("Received %0d data packets, expected %0d", recv_data_count, n_out));
       comparisons++;
       if ($system($sformatf(
           "env PYTHONIOENCODING=utf-8 python3 \"%s\" compare \"%s\" \"%s\" --mode packets",
           tj_py, golden_p, out_p)) == 0)
-        $display("CTRL CHIP TB: golden comparison PASS (%0d data packets)", n_data);
+        $display("CTRL CHIP TB: golden comparison PASS (%0d data packets)", recv_data_count);
       else begin
         errs++;
         $display("CTRL CHIP TB FAIL: packet output differs from golden");

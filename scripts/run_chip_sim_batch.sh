@@ -2,7 +2,7 @@
 # Run the default die-level cases sequentially, followed by any extra cases.
 # Usage: sh controller/scripts/run_chip_sim_batch.sh [extra_case ...]
 # Case names are relative to ROOT below.
-# MD=1 appends the small multi-die cases.
+# MD=1 appends the small and full multi-die cases; full cases can take several hours.
 # Each batch keeps separate logs under TMPDIR (default: /tmp).
 set -u
 ROOT=/data_8T_2/Tianjic/all_cases
@@ -33,6 +33,8 @@ die/16_core_spiketrans
 [ "${MD:-0}" = "1" ] && CASES="$CASES
 multi_die/conv_split_lvds_2dies_small
 multi_die/conv_split_spi_lvds_2dies_small
+multi_die/conv_split_lvds_2dies
+multi_die/conv_split_lvds_4dies
 "
 [ $# -gt 0 ] && CASES="$CASES $*"
 
@@ -45,7 +47,14 @@ for c in $CASES; do
   SPECIALS=0
   # Add dx=-32 and link-error checks for die_extern cases.
   case "$c" in die_extern/*) SPECIALS=1;; esac
-  if LVDS_EXTRA_TESTS=$SPECIALS sh "$HERE/run_chip_sim.sh" "$ROOT/$c" > "$CASE_LOG" 2>&1; then
+  # Full multi-die cases currently use the no-sleep configuration.
+  EXTRA_ARGS=${TJ_EXTRA:-}
+  case "$c" in
+    multi_die/conv_split_lvds_2dies|multi_die/conv_split_lvds_4dies)
+      EXTRA_ARGS="$EXTRA_ARGS +TJ_NOSLEEP"
+      ;;
+  esac
+  if LVDS_EXTRA_TESTS=$SPECIALS TJ_EXTRA="$EXTRA_ARGS" sh "$HERE/run_chip_sim.sh" "$ROOT/$c" > "$CASE_LOG" 2>&1; then
     PASS=$((PASS+1))
     printf '   PASS  %s\n' "$(grep 'CTRL CHIP TB PASS' "$CASE_LOG" | tail -1)"
   else
