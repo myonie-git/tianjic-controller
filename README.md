@@ -12,7 +12,7 @@
 | `rtl/pkg/` | 常量、记录格式和数据类型 |
 | `rtl/csr/` | 生成的寄存器 RTL |
 | `rtl/top/` | 顶层连接、APB 分路、时间戳和中断汇总 |
-| `rtl/spi/` | SPI 引擎、门铃、SPIWIN/BOOT仲裁和 SPIWIN 窗口 |
+| `rtl/spi/` | SPI 引擎、门铃、SPIWIN/BOOT仲裁、SPIWIN 窗口及北向旁路 SPI 从机 |
 | `rtl/boot/` | BOOT子系统封装、装载控制及64字节取数前端 |
 | `rtl/dma/` | SEND 取数与分发、RECV 环形写入、AXI 后端及指针快照同步 |
 | `rtl/lnk/` | FPGA 侧配置链主机，以及仿真用的直连和芯片 LVDS 适配模块 |
@@ -26,6 +26,8 @@
 现有 RTL 模块通过平铺端口连接；`rtl/pkg/tj_ctrl_if.sv` 保留了接口声明，尚未用于这些连接。
 生产清单包含 Controller RTL；仿真清单另加 `tj_lnk_plugs.sv`，芯片模型依赖由对应测试清单提供。
 BOOT由`tj_boot_subsys`连接控制引擎和取数前端；共享读仲裁位于顶层，SPI仲裁位于SPI子系统。
+`tj_bypass_spi` 由外层系统例化。`ENABLE_BYPASS_SPI` 默认 `0`，APB 直接透传并释放 MISO。
+实例参数设为 `.ENABLE_BYPASS_SPI(1'b1)` 时启用外部 SPI，并与上游 APB 请求仲裁后送入 `tj_ctrl_top`。
 
 ## 主要接口约定
 
@@ -33,14 +35,18 @@ BOOT由`tj_boot_subsys`连接控制引擎和取数前端；共享读仲裁位于
 |---|---|
 | Host APB | 32位数据，默认16位地址；访问 CSR 和 SPIWIN |
 | DDR AXI4 | 默认48位地址、128位数据；SEND 使用 INCR 读突发，RECV 使用单拍写 |
-| SPI | 8组引擎，每组选择4个 die；逻辑接口提供32路片选和32路 MISO |
+| 芯片侧 SPI | 8组引擎，每组选择4个 die；逻辑接口提供32路片选和32路 MISO |
+| 北向旁路 SPI | 可选从机，mode 0、MSB first，SCLK不超过pclk/8 |
 | LVDS 包接口 | 每实例4个96位 `valid/ready/data` 端口；默认3个通道组、1个链路实例 |
 | 配置链 | 33位输入、32位读回，配置 FPGA 侧 LVDS 实例，与 `pclk` 同域 |
 | 板级控制 | 32路低有效 die 复位输出和4位时钟控制输出；具体引脚映射由外层集成完成 |
 
 `pclk` 用于 CSR、SPI 和配置链，`maxi_clk` 用于 AXI、包收发和时间戳。
 `presetn`、`maxi_rstn` 均低有效，必须同源、同时断言。
-SPI 的周期参数按 `pclk <= 250 MHz` 设置，软件须选择分频使 SCLK 不超过25 MHz。
+芯片侧 SPI 的周期参数按 `pclk <= 250 MHz` 设置，软件须选择分频使 SCLK 不超过25 MHz。
+旁路 SPI 的片选建立时间和帧间片选高电平时间均至少为8个 `pclk` 周期，外层使用 `spi_miso_oe` 控制 MISO 引脚三态。
+访问 SPIWIN 等慢目标时采用单字访问，保持 SS 和 SCLK 为低，等待本次访问的最大总时延后继续。
+读操作在地址发完后暂停，写操作在数据字发完后暂停，写结果取恢复时钟后的第二个状态字节。
 
 DDR 记录为16字节小端格式：`tag[127:112]`、`flags[111:104]`、`ch[103:96]`、`pkt[95:0]`。
 SEND 的标志位为 LAST(bit0)、FENCE(bit1)、IRQ(bit2)，按记录中的逻辑通道号和 REMAP 配置分发；
@@ -103,7 +109,7 @@ REGRESS_WORK="$regress_work" sh controller/scripts/run_regress.sh
 ```
 
 该入口运行生成物一致性、CSR、SPI、顶层展开、APB冒烟、lint和CDC结构检查、镜像工具与格式、
-初始化重放、LVDS链路、SEND、RECV和BOOT检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 种子，
+初始化重放、LVDS链路、SEND、RECV、BOOT和旁路SPI检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 和旁路种子，
 `DSEEDS` 控制 SEND、RECV、BOOT 种子，默认 `default 31 166 7`；BOOT 每档时钟都运行这些种子。
 SEND 另用交付时钟（`pclk` 250 MHz、`maxi_clk` 50 MHz）和默认种子运行一次，跳过镜像重放。
 SPI、初始化重放和 BOOT 仿真启用 `TJ_ASSERT_ON`，检查 SPI 引擎接受的命令是否选中本组的 die。
@@ -120,6 +126,7 @@ BOOT 测例 [tb_tj_boot.sv](tb/boot/tb_tj_boot.sv) 通过 die 0 的 `spi2ahb` �
 它检查等待 DDR 时中止、原语写入中止、首次通过 APB 读到 `BUSY=0` 时的 `DONE/ERR`、DST 边界和装载期间的 SPIWIN 读取。
 回归的 BOOT 阶段共用一次编译，按三组 `pclk/maxi_clk` 频率运行（MHz）：100/416.7、250/50、10/100。
 芯片模型的 AHB 时钟固定为 100 MHz。
+旁路 SPI 通过上述回归入口运行，覆盖开启和关闭两种配置。
 专项测试及其时钟、抖动配置使用各自入口：
 
 | 测试 | 说明 |
@@ -129,6 +136,7 @@ BOOT 测例 [tb_tj_boot.sv](tb/boot/tb_tj_boot.sv) 通过 die 0 的 `spi2ahb` �
 | SEND、计数、事件和中止 | [SEND 测试](tb/send/README.md) |
 | RECV、环指针、重映射和中止 | [RECV 测试](tb/recv/README.md) |
 | 顶层控制和时间戳 | [顶层测试](tb/top/README.md) |
+| 北向旁路 SPI、APB 仲裁和编译开关 | [旁路测例](tb/bypass/tb_tj_bypass.sv) |
 
 芯片联合仿真单独运行，依赖原生芯片环境、VIP 和 RISC-V 工具链：
 
@@ -166,5 +174,6 @@ SEND 镜像按 FENCE 分批发送，各批复制到64字节对齐的暂存区，
 
 - [需求说明](../docs/controller/tianjic_controller_req.md)
 - [南向协议分析](../docs/controller/southside_protocol_findings.md)
+- [旁路 SPI 协议与集成说明](../docs/controller/tj_bypass_spi.md)
 - [开发约定](../docs/controller/dev_guide.md)
 - [项目进度](../docs/controller/worklog.md)

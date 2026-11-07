@@ -5,6 +5,8 @@ ${TJ_CTRL_HOME}/rtl/csr/tj_ctrl_csr_pkg.sv
 ${TJ_CTRL_HOME}/rtl/csr/tj_ctrl_csr.sv
 ${TJ_CTRL_HOME}/rtl/spi/tj_spi_engine.sv
 ${TJ_CTRL_HOME}/rtl/spi/tj_spi_subsys.sv
+// Shell-level SPI-to-APB bridge.
+${TJ_CTRL_HOME}/rtl/spi/tj_bypass_spi.sv
 ${TJ_CTRL_HOME}/rtl/common/tj_cdc.sv
 ${TJ_CTRL_HOME}/rtl/lnk/tj_cfgchain_master.sv
 ${TJ_CTRL_HOME}/rtl/dma/tj_axi_rd_backend.sv
