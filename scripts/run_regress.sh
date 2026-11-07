@@ -334,6 +334,7 @@ if ( cd "$WORK/recv" && \
   vcs -full64 -nc tb_tj_recv -o simv ) > "$WORK/recv/build.log" 2>&1 &&
   log_clean "$WORK/recv/build.log"; then
   data_runs "$WORK/recv" "RECV TB" run "$DSEEDS"
+  data_runs "$WORK/recv" "RECV TB" run_delivery default +TJ_PCLK_HP=2.0 +TJ_MAXI_HP=10.0
 else
   bad "RECV TB build failed (see $WORK/recv/build.log)"
 fi

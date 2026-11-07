@@ -12,6 +12,8 @@ module tb_tj_boot;
 
   real pclk_hp = half_period("TJ_PCLK_HP", 5.0);
   real maxi_hp = half_period("TJ_MAXI_HP", 1.2);
+  // Scale polling and watchdog budgets for the clock ratio.
+  int unsigned tscale = 1;
   logic pclk = 0, presetn = 0, maxi_clk = 0, maxi_rstn = 0;
   logic chip_hclk = 0;
   always #(pclk_hp) pclk = ~pclk;
@@ -203,7 +205,7 @@ module tb_tj_boot;
     logic [31:0] status;
     bit saw_busy;
     saw_busy = 0;
-    for (int t = 0; t < 200000; t++) begin
+    for (int t = 0; t < 200000 * tscale; t++) begin
       apb_rd(A_B_STA, status);
       if (status[0] === 1'b1) saw_busy = 1;
       if (status[0] === 1'b0 && (saw_busy || (exp_code == 4'd3 && status[8]))) break;
@@ -238,7 +240,7 @@ module tb_tj_boot;
 
   task automatic check_abort_idle(input string tag);
     logic [31:0] status;
-    for (int t = 0; t < 200000; t++) begin
+    for (int t = 0; t < 200000 * tscale; t++) begin
       apb_rd(A_B_STA, status);
       if (status[0] === 1'b0) break;
     end
@@ -444,6 +446,11 @@ module tb_tj_boot;
     $finish;
   end
 
-  initial begin #80ms; $fatal(1, "BOOT TB TIMEOUT"); end
+  initial begin
+    #0;  // Wait for clock plusargs to be applied.
+    tscale = int'(1.0 + (maxi_hp / 1.2) * (5.0 / pclk_hp));
+    #(80.0e6 * tscale * 1ns);
+    $fatal(1, "BOOT TB TIMEOUT");
+  end
 
 endmodule

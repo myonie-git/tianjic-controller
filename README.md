@@ -111,7 +111,8 @@ REGRESS_WORK="$regress_work" sh controller/scripts/run_regress.sh
 该入口运行生成物一致性、CSR、SPI、顶层展开、APB冒烟、lint和CDC结构检查、镜像工具与格式、
 初始化重放、LVDS链路、SEND、RECV、BOOT和旁路SPI检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 和旁路种子，
 `DSEEDS` 控制 SEND、RECV、BOOT 种子，默认 `default 31 166 7`；BOOT 每档时钟都运行这些种子。
-SEND 另用交付时钟（`pclk` 250 MHz、`maxi_clk` 50 MHz）和默认种子运行一次，跳过镜像重放。
+SEND、RECV 另用交付时钟（`pclk` 250 MHz、`maxi_clk` 50 MHz）和默认种子运行一次；SEND 跳过镜像重放。
+RECV、BOOT 的轮询次数和全局超时预算随 `pclk/maxi_clk` 比例缩放。
 SPI、初始化重放和 BOOT 仿真启用 `TJ_ASSERT_ON`，检查 SPI 引擎接受的命令是否选中本组的 die。
 `IMAGE_CASE` 选择镜像格式检查用例，`INIT_CASE` 选择初始化回放用例；
 `SKIP_APB_SMOKE`、`SKIP_SG`、`SKIP_LNK` 可跳过对应项目。`SKIP_SG`同时跳过lint与CDC。

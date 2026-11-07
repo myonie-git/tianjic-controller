@@ -11,6 +11,8 @@ module tb_tj_recv;
     if (pclk_hp <= 0 || maxi_hp <= 0) $fatal(1, "Clock half-periods must be positive");
     $display("RECV clocks: pclk_hp=%0f maxi_hp=%0f ns", pclk_hp, maxi_hp);
   end
+  // Scale polling and watchdog budgets for the clock ratio.
+  int unsigned tscale = 1;
   logic pclk = 0, presetn = 0, maxi_clk = 0, maxi_rstn = 0;
   always #(pclk_hp) pclk = ~pclk;
   always #(maxi_hp) maxi_clk = ~maxi_clk;
@@ -350,7 +352,7 @@ module tb_tj_recv;
     apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
     for (int n = 0; n < 8; n++) feed(1, 1'b0);  // Reach the watermark of eight records.
     v = 0;
-    for (int t = 0; t < 3000 && !v[0]; t++) apb_rd(A_RV(1, 8'h14), v);
+    for (int t = 0; t < 3000 * tscale && !v[0]; t++) apb_rd(A_RV(1, 8'h14), v);
     chk(v[0], "P2: WMARK_HIT");
     apb_rd(A_IRQ_RAW, v2);
     chk(v2[13], "P2: channel 1 watermark interrupt");
@@ -361,7 +363,7 @@ module tb_tj_recv;
     apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
     for (int n = 0; n < 8; n++) feed(1, 1'b0);  // Cross the watermark again.
     v = 0;
-    for (int t = 0; t < 3000 && !v[0]; t++) apb_rd(A_RV(1, 8'h14), v);
+    for (int t = 0; t < 3000 * tscale && !v[0]; t++) apb_rd(A_RV(1, 8'h14), v);
     chk(v[0], "P2: watermark retriggers after consumption");
     apb_wr(A_RV(1, 8'h14), 32'h7);
     consume(1, rptr_sh[1] + 8);
@@ -372,13 +374,13 @@ module tb_tj_recv;
     apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
     feed(0, 1'b1);  // Channel 0 END interrupt enabled.
     v = 0;
-    for (int t = 0; t < 3000 && !v[1]; t++) apb_rd(A_RV(0, 8'h14), v);
+    for (int t = 0; t < 3000 * tscale && !v[1]; t++) apb_rd(A_RV(0, 8'h14), v);
     chk(v[1], "P3: ch0 ENDPKT");
     apb_rd(A_IRQ_RAW, v2);
     chk(v2[12], "P3: channel 0 END interrupt enabled");
     feed(2, 1'b1);  // Channel 2 END interrupt disabled.
     v = 0;
-    for (int t = 0; t < 3000 && !v[1]; t++) apb_rd(A_RV(2, 8'h14), v);
+    for (int t = 0; t < 3000 * tscale && !v[1]; t++) apb_rd(A_RV(2, 8'h14), v);
     chk(v[1], "P3: channel 2 END status is independent of interrupt enable");
     apb_rd(A_IRQ_RAW, v2);
     chk(!v2[14], "P3: channel 2 END interrupt disabled");
@@ -391,12 +393,12 @@ module tb_tj_recv;
     for (int n = 0; n < 16; n++) feed(2, 1'b0);  // Fill the 16-record ring.
     // Wait for every write response before injecting overflow packets.
     v = 0;
-    for (int t = 0; t < 3000 && v != rptr_sh[2] + 16; t++) apb_rd(A_RV(2, 8'h18), v);
+    for (int t = 0; t < 3000 * tscale && v != rptr_sh[2] + 16; t++) apb_rd(A_RV(2, 8'h18), v);
     chk(v == rptr_sh[2] + 16, "P4: all 16 ring writes completed");
     for (int n = 0; n < 4; n++)
       send_rx(2, mk_pkt(1'b0));  // Overflow packets have no expected ring records.
     v = 0;
-    for (int t = 0; t < 3000 && !v[2]; t++) apb_rd(A_RV(2, 8'h14), v);
+    for (int t = 0; t < 3000 * tscale && !v[2]; t++) apb_rd(A_RV(2, 8'h14), v);
     chk(v[2], "P4: overflow status set");
     apb_rd(A_IRQ_RAW, v2);
     chk(v2[27], "P4: overflow interrupt set");
@@ -449,7 +451,7 @@ module tb_tj_recv;
     ring_cfg(0, 64'h100_0000_0000, 64, 8, 1'b0, 1'b1, 1'b1);  // Select the error address region.
     send_rx(0, mk_pkt(1'b0));  // The failed write has no valid expected record.
     v = 0;
-    for (int t = 0; t < 3000 && !v[28]; t++) apb_rd(A_IRQ_RAW, v);
+    for (int t = 0; t < 3000 * tscale && !v[28]; t++) apb_rd(A_IRQ_RAW, v);
     chk(v[28], "P7: AXI write error interrupt set");
     apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
     // An error response still advances WPTR; skip that slot before recovery.
@@ -465,7 +467,7 @@ module tb_tj_recv;
     cfg_settle();
     for (int n = 0; n < 16; n++) feed(2, 1'b0);  // Fill the ring.
     v = 0;
-    for (int t = 0; t < 3000 && v != rptr_sh[2] + 16; t++) apb_rd(A_RV(2, 8'h18), v);
+    for (int t = 0; t < 3000 * tscale && v != rptr_sh[2] + 16; t++) apb_rd(A_RV(2, 8'h18), v);
     chk(v == rptr_sh[2] + 16, "P8: ring is full before abort");
     fork
       begin : t_stuck
@@ -503,11 +505,11 @@ module tb_tj_recv;
     apb_wr(A_S_SRCLO, 32'h3000_0000); apb_wr(A_S_SRCHI, 32'h0);
     apb_wr(A_S_CNT, 30); apb_wr(A_S_DB, 32'h1);
     v = 0;
-    for (int t = 0; t < 5000 && !v[8]; t++) apb_rd(A_S_STA, v);
+    for (int t = 0; t < 5000 * tscale && !v[8]; t++) apb_rd(A_S_STA, v);
     chk(v[8], "P9: SEND DONE");
     apb_wr(A_S_STA, 32'h300);
     // Consume all expected records, allowing pending writes to finish.
-    for (int t = 0; t < 200 &&
+    for (int t = 0; t < 200 * tscale &&
          (exp_q[0].size() || exp_q[1].size() || exp_q[2].size()); t++) begin
       logic [31:0] wp;
       for (int c = 0; c < 3; c++) begin
@@ -528,6 +530,11 @@ module tb_tj_recv;
     $finish;
   end
 
-  initial begin #8ms; $fatal(1, "RECV TB TIMEOUT"); end
+  initial begin
+    #0;  // Wait for clock plusargs to be applied.
+    tscale = int'(1.0 + (maxi_hp / 1.2) * (5.0 / pclk_hp));
+    #(8.0e6 * tscale * 1ns);
+    $fatal(1, "RECV TB TIMEOUT");
+  end
 
 endmodule
