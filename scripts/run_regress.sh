@@ -182,6 +182,34 @@ EOF
   else
     bad "SpyGlass CDC execution failed (see $WORK/cdc/run.log)"
   fi
+
+  # The shell-level SPI bypass is not instantiated by tj_ctrl_top.
+  cat > "$WORK/sg/bypass_files.f" <<EOF
+$TJ_CTRL_HOME/rtl/common/tj_cdc.sv
+$TJ_CTRL_HOME/rtl/spi/tj_bypass_spi.sv
+$TJ_CTRL_HOME/tb/bypass/tj_bypass_static_top.sv
+EOF
+  for bypass_goal in lint/lint_rtl cdc/cdc_verify_struct; do
+    bypass_tag=$(printf '%s' "$bypass_goal" | tr '/' '_')
+    bypass_dir="$WORK/sg_bypass_$bypass_tag"
+    mkdir -p "$bypass_dir"
+    cat > "$bypass_dir/prj.prj" <<EOF
+#!SPYGLASS_PROJECT_FILE
+#!VERSION 3.0
+set_option projectwdir $bypass_dir
+set_option language_mode mixed
+set_option enableSV09 yes
+set_option top tj_bypass_static_top
+read_file -type sourcelist $WORK/sg/bypass_files.f
+read_file -type sgdc $TJ_CTRL_HOME/scripts/tj_bypass.sgdc
+EOF
+    if ( cd "$bypass_dir" && spyglass -project prj.prj -goal "$bypass_goal" -batch ) \
+         > "$bypass_dir/run.log" 2>&1; then
+      sg_report "$bypass_dir" "SpyGlass bypass ($bypass_goal)"
+    else
+      bad "SpyGlass bypass ($bypass_goal) execution failed (see $bypass_dir/run.log)"
+    fi
+  done
 fi
 
 # Image exporter CLI and SV format checks.
@@ -351,6 +379,23 @@ if ( cd "$WORK/bypass" && \
   fi
 else
   bad "Bypass SPI TB build failed (see $WORK/bypass/build.log)"
+fi
+
+# SPI accesses to the generated CSR block.
+if ( cd "$WORK/bypass" && \
+  vlogan -full64 -sverilog -nc +define+TJ_ASSERT_ON -timescale=1ns/1ps \
+    "$TJ_CTRL_HOME/rtl/csr/tj_ctrl_csr_pkg.sv" \
+    "$TJ_CTRL_HOME/rtl/csr/tj_ctrl_csr.sv" \
+    "$TJ_CTRL_HOME/rtl/common/tj_cdc.sv" \
+    "$TJ_CTRL_HOME/rtl/spi/tj_bypass_spi.sv" \
+    "$TJ_CTRL_HOME/tb/bypass/tb_tj_bypass_csr.sv" && \
+  vcs -full64 -nc tb_tj_bypass_csr -o simv_csr ) > "$WORK/bypass/build_csr.log" 2>&1 &&
+  log_clean "$WORK/bypass/build_csr.log" &&
+  ( cd "$WORK/bypass" && ./simv_csr -nc ) > "$WORK/bypass/run_csr.log" 2>&1 &&
+  sim_passed "$WORK/bypass/run_csr.log" "BYPASS CSR TB"; then
+  say "    $(grep '^BYPASS CSR TB PASS' "$WORK/bypass/run_csr.log")"
+else
+  bad "Bypass CSR test failed (see $WORK/bypass/build_csr.log and run_csr.log)"
 fi
 
 # Overall result.

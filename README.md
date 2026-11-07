@@ -44,7 +44,7 @@ BOOT由`tj_boot_subsys`连接控制引擎和取数前端；共享读仲裁位于
 `pclk` 用于 CSR、SPI 和配置链，`maxi_clk` 用于 AXI、包收发和时间戳。
 `presetn`、`maxi_rstn` 均低有效，必须同源、同时断言。
 芯片侧 SPI 的周期参数按 `pclk <= 250 MHz` 设置，软件须选择分频使 SCLK 不超过25 MHz。
-旁路 SPI 的片选建立时间和帧间片选高电平时间均至少为8个 `pclk` 周期，外层使用 `spi_miso_oe` 控制 MISO 引脚三态。
+旁路 SPI 的片选建立时间和帧间片选高电平时间均至少为8个 `pclk` 周期；释放片选前，SCLK保持低电平至少2个 `pclk` 周期。外层使用 `spi_miso_oe` 控制 MISO 引脚三态。
 访问 SPIWIN 等慢目标时采用单字访问，保持 SS 和 SCLK 为低，等待本次访问的最大总时延后继续。
 读操作在地址发完后暂停，写操作在数据字发完后暂停，写结果取恢复时钟后的第二个状态字节。
 
@@ -116,6 +116,7 @@ SPI、初始化重放和 BOOT 仿真启用 `TJ_ASSERT_ON`，检查 SPI 引擎接
 `IMAGE_CASE` 选择镜像格式检查用例，`INIT_CASE` 选择初始化回放用例；
 `SKIP_APB_SMOKE`、`SKIP_SG`、`SKIP_LNK` 可跳过对应项目。`SKIP_SG`同时跳过lint与CDC。
 CDC使用`controller/scripts/tj_ctrl.sgdc`，检查时钟为pclk=250MHz、maxi_clk=50MHz，不加载豁免文件。
+旁路 SPI 使用独立顶层 `tj_bypass_static_top` 显式开启功能，再运行 lint 和 CDC；约束为 `scripts/tj_bypass.sgdc`，pclk=250MHz、SCLK=25MHz，不加载豁免文件。
 工具或用例不可用时，部分项目也会跳过，运行结果须结合日志中的跳过项查看。
 
 镜像阶段先运行 Python CLI 测试，检查地址段、比较器和各核 CONFIG，再用 SV 核对记录及内存数据。
@@ -126,7 +127,7 @@ BOOT 测例 [tb_tj_boot.sv](tb/boot/tb_tj_boot.sv) 通过 die 0 的 `spi2ahb` �
 它检查等待 DDR 时中止、原语写入中止、首次通过 APB 读到 `BUSY=0` 时的 `DONE/ERR`、DST 边界和装载期间的 SPIWIN 读取。
 回归的 BOOT 阶段共用一次编译，按三组 `pclk/maxi_clk` 频率运行（MHz）：100/416.7、250/50、10/100。
 芯片模型的 AHB 时钟固定为 100 MHz。
-旁路 SPI 通过上述回归入口运行，覆盖开启和关闭两种配置。
+旁路 SPI 通过上述回归入口运行，覆盖开启和关闭两种配置。另用 `tb_tj_bypass_csr.sv` 连接生成的 `tj_ctrl_csr`，检查寄存器读写、W1C、只读寄存器和未映射地址响应。
 专项测试及其时钟、抖动配置使用各自入口：
 
 | 测试 | 说明 |
@@ -137,6 +138,7 @@ BOOT 测例 [tb_tj_boot.sv](tb/boot/tb_tj_boot.sv) 通过 die 0 的 `spi2ahb` �
 | RECV、环指针、重映射和中止 | [RECV 测试](tb/recv/README.md) |
 | 顶层控制和时间戳 | [顶层测试](tb/top/README.md) |
 | 北向旁路 SPI、APB 仲裁和编译开关 | [旁路测例](tb/bypass/tb_tj_bypass.sv) |
+| 旁路 SPI 与生成的 CSR | [CSR 连接测例](tb/bypass/tb_tj_bypass_csr.sv) |
 
 芯片联合仿真单独运行，依赖原生芯片环境、VIP 和 RISC-V 工具链：
 

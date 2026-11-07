@@ -1,0 +1,6 @@
+# SPI bypass clocks: pclk 250 MHz, external SCLK 25 MHz.
+# SPI inputs are sampled in pclk; no manual CDC waivers are loaded.
+current_design tj_bypass_static_top
+clock -name pclk -domain pclk_dom -period 4
+clock -name spi_sclk -domain spi_dom -period 40
+reset -name presetn -value 0
