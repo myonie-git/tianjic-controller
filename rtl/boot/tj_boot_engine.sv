@@ -249,6 +249,10 @@ module tj_boot_engine
             cmd_valid  <= 1'b0;
             wdat_valid <= 1'b1;
             st_q <= B_DATA;
+          end else if ((abort_q || srst) && ph_q != P_CLKOFF) begin
+            // Cancel an unaccepted command; retain required CLK_SHIFT cleanup.
+            cmd_valid <= 1'b0;
+            st_q <= B_FETCH;
           end
           if (err_timeout) begin
             cmd_valid <= 1'b0; err_code_o <= 4'd1;

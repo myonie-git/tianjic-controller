@@ -29,6 +29,11 @@ module tb_tj_boot;
   // Controller CSR offsets.
   localparam [15:0] A_GLB_CTRL = 16'h000C;
   localparam [15:0] A_IRQ_RAW  = 16'h0100;
+  localparam [15:0] A_SPI_CMD  = 16'h0400;
+  localparam [15:0] A_SPI_ADDR = 16'h0404;
+  localparam [15:0] A_SPI_WD   = 16'h0408;
+  localparam [15:0] A_SPI_DB   = 16'h0418;
+  localparam [15:0] A_SPI_STA  = 16'h041C;
   localparam [15:0] A_SPI_DIV  = 16'h0410;
   localparam [15:0] A_SPI_TMO  = 16'h0414;
   localparam [15:0] A_B_CMD    = 16'h0800;
@@ -440,6 +445,66 @@ module tb_tj_boot;
       boot_run(2'd0, SRC0, 64, 32'hFFFF_FFC0, 0, "P10 last block", phase);
       check_log("P10 last block");
     end
+
+    // P11: Abort BOOT while a doorbell transaction holds the SPI group.
+    // Cases: firmware data, initial CLK_SHIFT write, and primitive data.
+    // Slow SPI keeps the doorbell active until SRST is issued.
+    apb_wr(A_SPI_DIV, 32'd15);
+    for (int k = 0; k < 3; k++) begin
+      automatic bit prim = (k != 0);
+      automatic longint unsigned src = SRC0 + 64'hB000 + 64'(k) * 64'h1000;
+      automatic logic [31:0] dbd = 32'h600D_0000 + 32'(k);
+      prep_words(src, 16, prim ? 32'h0200_0000 : 32'h0100_C000);
+      exp_q.delete();
+      repeat (400) @(posedge pclk);
+      wr_log.delete();
+      apb_wr(A_SPI_STA,  32'h0000_0300);
+      apb_wr(A_SPI_CMD,  32'h0);
+      apb_wr(A_SPI_ADDR, 32'h0100_F000);
+      apb_wr(A_SPI_WD,   dbd);
+      apb_wr(A_B_CMD,    {23'h0, 5'h0, 2'h0, prim ? 2'd1 : 2'd0});
+      apb_wr(A_B_SRCLO,  src[31:0]);
+      apb_wr(A_B_SRCHI,  {16'h0, src[47:32]});
+      apb_wr(A_B_LEN,    32'd64);
+      apb_wr(A_B_DST,    prim ? 32'h0200_0000 : 32'h0100_C000);
+      if (k == 2) begin
+        // Complete CLK_SHIFT=1, then let the doorbell block the BOOT data command.
+        apb_wr(A_B_DB,   32'h1);
+        apb_wr(A_SPI_DB, 32'h1);
+        repeat (3400) @(posedge pclk);
+      end else begin
+        // Start the doorbell first so the first BOOT command waits for the group.
+        apb_wr(A_SPI_DB, 32'h1);
+        apb_wr(A_B_DB,   32'h1);
+        repeat (800) @(posedge pclk);
+      end
+      apb_rd(A_SPI_STA, v);
+      chk(v[0], $sformatf("P11.%0d: doorbell is busy before SRST", k));
+      apb_rd(A_B_STA, v);
+      chk(v[0], $sformatf("P11.%0d: BOOT is busy before SRST", k));
+      apb_wr(A_GLB_CTRL, 32'h1);
+      v = 32'h1;
+      for (int t = 0; t < 200000 * tscale && v[0]; t++) apb_rd(A_B_STA, v);
+      chk(!v[0], $sformatf("P11.%0d: BOOT becomes idle after SRST", k));
+      chk(!v[8], $sformatf("P11.%0d: SRST does not set BOOT DONE", k));
+      v = 0;
+      for (int t = 0; t < 200000 * tscale && !v[8]; t++) apb_rd(A_SPI_STA, v);
+      chk(v[8] && !v[9], $sformatf("P11.%0d: doorbell completes without a timeout", k));
+      // Allow any uncanceled command to reach the chip before checking the write log.
+      repeat (3000) @(posedge pclk);
+      if (k == 2) exp_wr(32'h0208000C, 32'h1);
+      exp_wr(32'h0100_F000, dbd);
+      if (k == 2) exp_wr(32'h0208000C, 32'h0);
+      check_log($sformatf("P11.%0d(%s)", k,
+                k == 0 ? "FW: doorbell only" : k == 1 ? "PRIM clock-on: doorbell only" : "PRIM data: clock-on/doorbell/clock-off"));
+    end
+    // Restore normal timing and check that a new BOOT task completes.
+    apb_wr(A_SPI_DIV, spi_div);
+    apb_wr(A_SPI_STA, 32'h0000_0300);
+    prep_prim(SRC0 + 64'hE000, 16, 32'h0200_0000);
+    boot_run(2'd1, SRC0 + 64'hE000, 32'd64, 32'h0200_0000, 4'd0, "P11b");
+    check_log("P11b");
+    $display("P11 done (%0d checks, %0d errs)", checks, errs);
 
     if (errs != 0 || checks == 0) $fatal(1, "BOOT TB FAIL (%0d/%0d)", errs, checks);
     $display("BOOT TB PASS (%0d checks)", checks);
