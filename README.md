@@ -114,6 +114,8 @@ REGRESS_WORK="$regress_work" sh controller/scripts/run_regress.sh
 `DSEEDS` 控制 SEND、RECV、BOOT 种子，默认 `default 31 166 7`；BOOT 每档时钟都运行这些种子。
 SEND、RECV 另用交付时钟（`pclk` 250 MHz、`maxi_clk` 50 MHz）和默认种子运行一次；SEND 跳过镜像重放。
 RECV、BOOT 的轮询次数和全局超时预算随 `pclk/maxi_clk` 比例缩放。
+SEND、RECV同时运行边界档（pclk=10MHz、maxi_clk=100MHz）。
+第14阶段以CDC采样延迟模型重新编译SEND、RECV、BOOT，运行三档时钟；JSEEDS默认1～8。
 SPI、初始化重放和 BOOT 仿真启用 `TJ_ASSERT_ON`，检查 SPI 引擎接受的命令是否选中本组的 die。
 `IMAGE_CASE` 选择镜像格式检查用例，`INIT_CASE` 选择初始化回放用例；
 `SKIP_APB_SMOKE`、`SKIP_SG`、`SKIP_LNK` 可跳过对应项目。`SKIP_SG`同时跳过lint与CDC。
@@ -136,6 +138,7 @@ RECV换环可用于软件双缓冲交替、调整缓冲容量和切换接收任�
 缓冲区分配和切换由Host控制，不自动交换缓冲区。
 EN同步到接收域后再延迟2拍启用；配置时先写环参数，再使能。
 BOOT新增等待SPI组仲裁期间的中止与恢复测例。
+SEND补充连续错误、IRQ和轮询相位检查。
 专项测试及其时钟、抖动配置使用各自入口：
 
 | 测试 | 说明 |
@@ -177,6 +180,7 @@ SEND 镜像按 FENCE 分批发送，各批复制到64字节对齐的暂存区，
 
 - [寄存器手册](doc/tj_ctrl_regmap.md)：寄存器地址、位域和操作说明。
 - [SEND 取数 FIFO 综合记录](doc/tj_send_fetch_synth_note.md)：FIFO 结构及工具报告中的存储器映射。
+- [Quartus构建结果](doc/evidence/README.md)：当前RTL的Agilex 7、Cyclone 10 GX及开启旁路的OOC报告。
 - [镜像工具](sw/README.md)：导出文件、比较模式、地址段和初始化命令清单。
 - 各测试目录的 README：运行方式和具体覆盖范围，入口见上表。
 

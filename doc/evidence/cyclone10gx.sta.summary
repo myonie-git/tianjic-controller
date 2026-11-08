@@ -3,34 +3,29 @@ Timing Analyzer Summary
 ------------------------------------------------------------
 
 Type  : Setup 'pclk'
-Slack : 0.492
+Slack : 0.232
 TNS   : 0.000
 Corner: Slow 900mV 100C Model
 
 Type  : Setup 'maxi_clk'
-Slack : 2.483
+Slack : 10.667
 TNS   : 0.000
 Corner: Slow 900mV 100C Model
-
-Type  : Setup 'n/a'
-Slack : 4.817
-TNS   : 0.000
-Corner: Slow 900mV 100C Model
-
-Type  : Hold 'pclk'
-Slack : 0.017
-TNS   : 0.000
-Corner: Fast 900mV 0C Model
 
 Type  : Hold 'maxi_clk'
-Slack : 0.018
+Slack : 0.016
 TNS   : 0.000
 Corner: Fast 900mV 0C Model
 
-Type  : Hold 'n/a'
-Slack : 2.091
+Type  : Hold 'pclk'
+Slack : 0.016
 TNS   : 0.000
 Corner: Fast 900mV 0C Model
+
+Type  : Setup Data Delay 'maxi_clk'
+Slack : 18.293
+TNS   : 0.000
+Corner: Slow 900mV 100C Model
 
 Type  : Minimum Pulse Width 'pclk'
 Slack : 1.854
@@ -38,8 +33,68 @@ TNS   : 0.000
 Corner: Slow 900mV 0C Model
 
 Type  : Minimum Pulse Width 'maxi_clk'
-Slack : 4.596
+Slack : 9.586
 TNS   : 0.000
-Corner: Slow 900mV 100C Model
+Corner: Slow 900mV 0C Model
+
+Type  : Slow 900mV 100C Model Max Skew 'set_max_skew'
+Slack : 3.118
+
+Type  : Slow 900mV 100C Model Max Skew 'set_max_skew'
+Slack : 3.139
+
+Type  : Slow 900mV 100C Model Max Skew 'set_max_skew'
+Slack : 3.184
+
+Type  : Slow 900mV 100C Model Max Skew 'set_max_skew'
+Slack : 3.203
+
+Type  : Slow 900mV 0C Model Max Skew 'set_max_skew'
+Slack : 3.145
+
+Type  : Slow 900mV 0C Model Max Skew 'set_max_skew'
+Slack : 3.172
+
+Type  : Slow 900mV 0C Model Max Skew 'set_max_skew'
+Slack : 3.175
+
+Type  : Slow 900mV 0C Model Max Skew 'set_max_skew'
+Slack : 3.214
+
+Type  : Fast 900mV 100C Model Max Skew 'set_max_skew'
+Slack : 3.372
+
+Type  : Fast 900mV 100C Model Max Skew 'set_max_skew'
+Slack : 3.418
+
+Type  : Fast 900mV 100C Model Max Skew 'set_max_skew'
+Slack : 3.424
+
+Type  : Fast 900mV 100C Model Max Skew 'set_max_skew'
+Slack : 3.460
+
+Type  : Fast 900mV 0C Model Max Skew 'set_max_skew'
+Slack : 3.415
+
+Type  : Fast 900mV 0C Model Max Skew 'set_max_skew'
+Slack : 3.459
+
+Type  : Fast 900mV 0C Model Max Skew 'set_max_skew'
+Slack : 3.465
+
+Type  : Fast 900mV 0C Model Max Skew 'set_max_skew'
+Slack : 3.486
+
+Type  : Net Delay 'set_net_delay'
+Slack : 2.320
+
+Type  : Net Delay 'set_net_delay'
+Slack : 2.335
+
+Type  : Net Delay 'set_net_delay'
+Slack : 2.376
+
+Type  : Net Delay 'set_net_delay'
+Slack : 18.187
 
 ------------------------------------------------------------

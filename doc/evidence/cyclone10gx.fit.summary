@@ -1,4 +1,4 @@
-Fitter Status : Successful - Wed Aug 12 17:09:15 2026
+Fitter Status : Successful - Sun Nov  8 23:05:11 2026
 Quartus Prime Version : 24.3.0 Build 212 11/18/2024 SC Pro Edition
 Revision Name : tjctrl
 Top-level Entity Name : tj_ctrl_top
@@ -7,10 +7,10 @@ Device : 10CX220YF672E5G
 Timing Models : Final
 Power Models : Final
 Device Status : Final
-Logic utilization (in ALMs) : 5,700 / 80,330 ( 7 % )
+Logic utilization (in ALMs) : 5,763 / 80,330 ( 7 % )
   * Logic utilization warning : A large number of ALMs contain virtual pins and count towards logic utilization
   * ALMs containing virtual pins : 886 / 80,330 ( 1 % )
-Total registers : 10088
+Total registers : 10162
 Total pins : 0 / 284 ( 0 % )
 Total virtual pins : 1,770
 Total block memory bits : 27,136 / 12,021,760 ( < 1 % )

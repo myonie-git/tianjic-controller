@@ -125,8 +125,9 @@ module tb_tj_send;
 
   int ar_stall;
   bit force_ar_block = 0;
+  bit ddr_fast = 0;  // Remove random DDR stalls for fast error responses.
   always @(posedge maxi_clk) ar_stall <= $urandom_range(0, 9);
-  assign arready = maxi_rstn && !force_ar_block && (ar_stall != 0);
+  assign arready = maxi_rstn && !force_ar_block && (ddr_fast || ar_stall != 0);
   always @(posedge maxi_clk) if (arvalid && arready) begin
     ar_t a;
     chk(arsize === 3'd4, "AXI ARSIZE must select 16-byte beats");
@@ -144,7 +145,7 @@ module tb_tj_send;
       if (arq.size() > 0) begin
         automatic ar_t a = arq.pop_front();
         for (int b = 0; b <= a.len; b++) begin
-          while ($urandom_range(0, 3) == 0) @(posedge maxi_clk);
+          while (!ddr_fast && $urandom_range(0, 3) == 0) @(posedge maxi_clk);
           rvalid <= 1;
           rdata  <= ddr.exists((a.addr >> 4) + b) ? ddr[(a.addr >> 4) + b] : '0;
           rresp  <= a.addr[40] ? 2'b10 : 2'b00;
@@ -240,11 +241,13 @@ module tb_tj_send;
     apb_wr(A_DB, 32'h1);
   endtask
 
+  int unsigned poll_skew = 0;  // Delay polling by this many pclk cycles.
   // Start a table and check completion, status, count and packets.
   task automatic run_table(input longint unsigned base, input int unsigned cnt,
                            input string tag);
     logic [31:0] v;
     start_table(base, cnt);
+    repeat (poll_skew) @(posedge pclk);
     // Poll for task completion.
     v = 0;
     for (int t = 0; t < apb_poll_limit(20000); t++) begin
@@ -582,6 +585,112 @@ module tb_tj_send;
     load_table(TBL_BASE,recs); run_table(TBL_BASE,300,"EARLY_LAST_MULTIBURST");
     chk(exp_sent==5 && outstanding==0,"EARLY_LAST_MULTIBURST: five outputs and all reads drained");
     $display("P10-P12 done (%0d checks, %0d errs)", checks, errs);
+
+    // P13: Consecutive error and IRQ tasks, polling phases and recovery.
+    // Each fast AXI failure must raise a new error event.
+    ddr_fast = 1'b1;
+    for (int k = 0; k < 3; k++) begin
+      clr_expect();
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      recs.delete();
+      recs.push_back(mk_rec(16'(k), REC_LAST, 8'd0, rnd_pkt()));
+      foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
+      exp_err = 1;
+      run_table(ERR_BASE, 1, $sformatf("P13.%0d", k));
+      apb_rd(A_IRQ_RAW, v);
+      chk(v[28], $sformatf("P13.%0d: each AXI error task sets RAW[28]", k));
+    end
+    // Invalid records report errors while valid records continue.
+    for (int k = 0; k < 2; k++) begin
+      clr_expect();
+      recs.delete();
+      recs.push_back(mk_rec(16'h666, 8'h0, 8'd13, rnd_pkt()));
+      recs.push_back(mk_rec(16'h667, REC_LAST, 8'd0, rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      run_table(TBL_BASE, recs.size(), $sformatf("P13r.%0d", k));
+      chk(exp_err, "P13r: test input must require ERR");
+    end
+    // Check ERR in the first DONE read at all four APB polling phases.
+    for (int k = 0; k < 8; k++) begin
+      clr_expect();
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      poll_skew = k % 4;
+      recs.delete();
+      if (k < 4) begin
+        recs.push_back(mk_rec(16'(k), REC_LAST, 8'd0, rnd_pkt()));
+        foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
+        exp_err = 1;
+        run_table(ERR_BASE, 1, $sformatf("P13s.%0d(AXI error, phase %0d)", k, poll_skew));
+        apb_rd(A_IRQ_RAW, v);
+        chk(v[28], $sformatf("P13s.%0d: RAW[28]", k));
+      end else begin
+        recs.push_back(mk_rec(16'h666, 8'h0, 8'd13, rnd_pkt()));
+        recs.push_back(mk_rec(16'h667, REC_LAST, 8'd0, rnd_pkt()));
+        load_table(TBL_BASE, recs);
+        run_table(TBL_BASE, recs.size(), $sformatf("P13s.%0d(invalid record, phase %0d)", k, poll_skew));
+        chk(exp_err, "P13s: test input must require ERR");
+      end
+    end
+    // A successful task must not inherit a previous task's error.
+    poll_skew = 0;
+    clr_expect();
+    recs.delete();
+    recs.push_back(mk_rec(16'h0, REC_LAST, 8'd0, rnd_pkt()));
+    foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
+    exp_err = 1;
+    run_table(ERR_BASE, 1, "P13c.0(AXI error)");
+    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+    clr_expect();
+    recs.delete();
+    for (int i = 0; i < 6; i++)
+      recs.push_back(mk_rec(16'(i), (i == 5) ? REC_LAST : 8'h0,
+                            8'($urandom_range(0, 2)), rnd_pkt()));
+    load_table(TBL_BASE, recs);
+    run_table(TBL_BASE, 6, "P13c.1(valid table)");
+    repeat (16) @(posedge pclk);
+    apb_rd(A_STA, v);
+    chk(!v[9], "P13c: ERR remains clear after a valid task");
+    apb_rd(A_IRQ_RAW, v);
+    chk(!v[28], "P13c: valid task keeps RAW[28] clear");
+    // Each task must report its record IRQ before completion.
+    for (int k = 0; k < 2; k++) begin
+      clr_expect();
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      recs.delete();
+      for (int i = 0; i < 400; i++)
+        recs.push_back(mk_rec(16'(i), (i == 0) ? REC_IRQ
+                                    : (i == 399) ? REC_LAST : 8'h0,
+                              8'($urandom_range(0, 2)), rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      apb_wr(A_SRC_LO, TBL_BASE[31:0]); apb_wr(A_SRC_HI, {16'h0, TBL_BASE[47:32]});
+      apb_wr(A_CNT, 400); apb_wr(A_DB, 32'h1);
+      v2 = 0;
+      for (int t = 0; t < 5000; t++) begin
+        apb_rd(A_IRQ_RAW, v);
+        if (v[9]) begin apb_rd(A_GLB_STA, v2); break; end
+      end
+      chk(v[9], $sformatf("P13i.%0d: IRQ-marked record sets RAW[9]", k));
+      chk(v2[9], $sformatf("P13i.%0d: SEND is still busy when the record IRQ arrives", k));
+      v = 0;
+      for (int t = 0; t < apb_poll_limit(20000); t++) begin
+        apb_rd(A_STA, v);
+        if (v[8]) break;
+      end
+      chk(v[8], $sformatf("P13i.%0d: DONE timeout", k));
+      apb_wr(A_STA, 32'h300);
+      check_ports($sformatf("P13i.%0d", k));
+    end
+    // Restore random DDR stalls and check normal task completion.
+    ddr_fast = 1'b0;
+    clr_expect();
+    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+    recs.delete();
+    for (int i = 0; i < 6; i++)
+      recs.push_back(mk_rec(16'(i), (i == 5) ? REC_LAST : 8'h0,
+                            8'($urandom_range(0, 2)), rnd_pkt()));
+    load_table(TBL_BASE, recs);
+    run_table(TBL_BASE, 6, "P13b");
+    $display("P13 done (%0d checks, %0d errs)", checks, errs);
 
     if (errs == 0 && checks > 0) $display("SEND TB PASS (%0d checks)", checks);
     else           $display("SEND TB FAIL (%0d/%0d)", errs, checks);

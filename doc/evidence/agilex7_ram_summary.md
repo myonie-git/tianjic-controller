@@ -1,12 +1,20 @@
-# agilex7 —— mem_q 落块与资源(原始报告摘录)
+# agilex7：SEND FIFO RAM实现
 
-来源为 2026-08-12 的 `tjctrl.fit.place.rpt`，摘自 `Fitter Resource Usage Summary` 和 `Fitter RAM Summary`。
+日期：2026-11-08。RTL基线65b24eaa，器件AGIB041R29D1E2VB，pclk/maxi_clk=250/50MHz。
+来源为本次tjctrl.fit.place.rpt的Fitter RAM Summary；顶层资源见[布局布线摘要](agilex7.fit.summary)。
 
+| 项目 | 结果 |
+|---|---|
+| 实例 | u_send/u_fetch/mem_q_rtl_0 |
+| 类型 | M20K，简单双口、单时钟 |
+| 深度 × 实现宽度 | 256 × 106位 |
+| 实现位数 | 27,136 |
+| M20K数量 | 3 |
+
+原始实例行：
+
+```text
+; u_send|u_fetch|mem_q_rtl_0|auto_generated|altera_syncram_impl1|ALTERA_SYNCRAM ; M20K ; Simple Dual Port ; Single Clock ; 256          ; 106          ; 256          ; 106          ; yes                    ; no                      ; yes                    ; no                      ; 27136        ; 256                         ; 106                         ; 256                         ; 106                         ; 27136               ; 3           ; 0     ; None ; M20K_X178_Y173_N0, M20K_X178_Y176_N0, M20K_X178_Y178_N0 ; Don't care          ; New data        ; New data        ; Off      ; No                     ; No - Size Too Big ;
 ```
-; Logic utilization (ALMs needed / total ALMs on device)      ; 7,255 / 1,356,160    ; < 1 % ;
-; M20K blocks                                                 ; 3 / 17,136           ; < 1 % ;
-; Total MLAB memory bits                                      ; 0                    ;       ;
-; Total block memory bits                                     ; 27,136 / 350,945,280 ; < 1 % ;
-; Name                                                                          ; Type ; Mode             ; Clock Mode   ; Port A Depth ; Port A Width ; Port B Depth ; Port B Width ; Port A Input Registers ; Port A Output Registers ; Port B Input Registers ; Port B Output Registers ; Logical Size ; Implementation Port A Depth ; Implementation Port A Width ; Implementation Port B Depth ; Implementation Port B Width ; Implementation Bits ; M20K blocks ; MLABs ; MIF  ; Location                                                ; Mixed Port RDW Mode ; Port A RDW Mode ; Port B RDW Mode ; ECC Mode ; ECC Pipeline Registers ; Fits in MLABs     ;
-; u_send|u_fetch|mem_q_rtl_0|auto_generated|altera_syncram_impl1|ALTERA_SYNCRAM ; M20K ; Simple Dual Port ; Single Clock ; 256          ; 106          ; 256          ; 106          ; yes                    ; no                      ; yes                    ; no                      ; 27136        ; 256                         ; 106                         ; 256                         ; 106                         ; 27136               ; 3           ; 0     ; None ; M20K_X291_Y172_N0, M20K_X278_Y174_N0, M20K_X291_Y174_N0 ; Don't care          ; New data        ; New data        ; Off      ; No                     ; No - Size Too Big ;
-```
+
+源代码的记录宽度为128位，106位是该顶层综合后保留的宽度。

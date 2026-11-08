@@ -6,6 +6,7 @@
 # INIT_CASE selects the initialization replay case.
 # SEEDS overrides SPI and bypass seeds; EXTRA_SEEDS appends more.
 # DSEEDS selects seeds for SEND, RECV and BOOT.
+# JSEEDS selects seeds for the three-clock-ratio CDC jitter runs.
 # SKIP_APB_SMOKE, SKIP_SG and SKIP_LNK skip the corresponding stages.
 set -u
 
@@ -17,6 +18,7 @@ export TIANJIC_A_DESIGN=${TIANJIC_A_DESIGN:-$REPO/design}
 WORK=${REGRESS_WORK:-/tmp/tj_regress_$(id -un)}
 SEEDS=${SEEDS:-"default 31 166 336 7 99"}${EXTRA_SEEDS:+" $EXTRA_SEEDS"}
 DSEEDS=${DSEEDS:-"default 31 166 7"}
+JSEEDS=${JSEEDS:-"1 2 3 4 5 6 7 8"}
 FAIL=0
 
 say()  { printf '%s\n' "== $*"; }
@@ -33,7 +35,7 @@ sim_passed() {
 rm -rf "$WORK"; mkdir -p "$WORK/gen" "$WORK/csr" "$WORK/spi" "$WORK/top" "$WORK/apb_smoke" "$WORK/sg"
 
 # CSR generated files.
-say "[1/13] 生成物防漂移门禁"
+say "[1/14] 生成物防漂移门禁"
 mkdir -p "$WORK/gen/rtl" "$WORK/gen/doc" "$WORK/gen/tb"
 ( cd "$TJ_CTRL_HOME/csr" && python3 gen_csr.py tj_ctrl_csr.yaml \
     --out-rtl "$WORK/gen/rtl" --out-doc "$WORK/gen/doc" --out-tb "$WORK/gen/tb" ) \
@@ -49,7 +51,7 @@ done
 [ $FAIL -eq 0 ] && say "    门禁通过:四件产物与真源逐字节一致"
 
 # CSR register test.
-say "[2/13] CSR 自测 TB"
+say "[2/14] CSR 自测 TB"
 if ( cd "$WORK/csr" && \
   vlogan -full64 -sverilog -nc -timescale=1ns/1ps \
     "$TJ_CTRL_HOME/rtl/csr/tj_ctrl_csr_pkg.sv" \
@@ -64,7 +66,7 @@ else
 fi
 
 # SPI tests across seeds.
-say "[3/13] SPI 陪练 TB × 种子集 [$SEEDS]"
+say "[3/14] SPI 陪练 TB × 种子集 [$SEEDS]"
 ( cd "$WORK/spi" && \
   vlogan -full64 -sverilog -nc +define+TJ_ASSERT_ON -timescale=1ns/1ps \
     "$TJ_CTRL_HOME/rtl/pkg/tj_ctrl_pkg.sv" \
@@ -89,7 +91,7 @@ n_seed=$(echo $SEEDS | wc -w)
 [ "$n_pass" = "$n_seed" ] && say "    全种子($n_pass/$n_seed) $(grep -h 'SPI TB PASS' "$WORK"/spi/run_*.log | sort -u)"
 
 # Top-level elaboration.
-say "[4/13] 顶层弹性"
+say "[4/14] 顶层弹性"
 ( cd "$WORK/top" && \
   vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" && \
   vcs -full64 -nc tj_ctrl_top -o simv ) > "$WORK/top/run.log" 2>&1 \
@@ -97,9 +99,9 @@ say "[4/13] 顶层弹性"
 
 # Compile Controller and chip RTL together, then run the APB smoke test.
 if [ "${SKIP_APB_SMOKE:-0}" = "1" ]; then
-  say "[5/13] APB 共库冒烟:SKIP_APB_SMOKE=1 跳过"
+  say "[5/14] APB 共库冒烟:SKIP_APB_SMOKE=1 跳过"
 else
-  say "[5/13] APB 共库编译及APB冒烟"
+  say "[5/14] APB 共库编译及APB冒烟"
   # Match the native chip build's duplicate-module policy.
   if ( cd "$WORK/apb_smoke" && \
     vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" && \
@@ -142,9 +144,9 @@ sg_report() {
 
 # SpyGlass lint and CDC structure checks.
 if [ "${SKIP_SG:-0}" = "1" ] || ! command -v spyglass >/dev/null 2>&1; then
-  say "[6/13] SpyGlass lint/CDC: skipped (SKIP_SG=1 or tool unavailable)"
+  say "[6/14] SpyGlass lint/CDC: skipped (SKIP_SG=1 or tool unavailable)"
 else
-  say "[6/13] SpyGlass lint and CDC structure checks"
+  say "[6/14] SpyGlass lint and CDC structure checks"
   sed "s|\${TJ_CTRL_HOME}|$TJ_CTRL_HOME|g" "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
     > "$WORK/sg/expanded.f"
   cat > "$WORK/sg/tj.prj" <<EOF
@@ -213,7 +215,7 @@ EOF
 fi
 
 # Image exporter CLI and SV format checks.
-say "[7/13] 镜像工具与格式检查"
+say "[7/14] 镜像工具与格式检查"
 mkdir -p "$WORK/image"
 if PYTHONIOENCODING=utf-8 python3 "$TJ_CTRL_HOME/tb/sw/test_tj_image.py" \
   --tool "$TJ_CTRL_HOME/sw/tj_image.py" --work "$WORK/image/python" \
@@ -245,9 +247,9 @@ fi
 # Initialization command replay through SPI-to-AHB models.
 INIT_CASE=${INIT_CASE:-/data_8T_2/Tianjic/all_cases/die_extern/resnet9_lvds}
 if [ ! -d "$INIT_CASE" ]; then
-  say "[8/13] Initialization replay: skipped (case directory not found: $INIT_CASE)"
+  say "[8/14] Initialization replay: skipped (case directory not found: $INIT_CASE)"
 else
-  say "[8/13] Initialization replay (APB -> SPIWIN -> SPI -> spi2ahb)"
+  say "[8/14] Initialization replay (APB -> SPIWIN -> SPI -> spi2ahb)"
   mkdir -p "$WORK/init"
   if ( INIT_CASE=$(cd "$INIT_CASE" && pwd) && \
     python3 "$TJ_CTRL_HOME/sw/tj_image.py" export "$INIT_CASE" \
@@ -268,11 +270,11 @@ fi
 # LVDS link test.
 echo
 if [ "${SKIP_LNK:-0}" = "1" ]; then
-  say "[9/13] LVDS 链路验收 TB:跳过(SKIP_LNK=1)"
+  say "[9/14] LVDS 链路验收 TB:跳过(SKIP_LNK=1)"
 elif [ ! -f "$YAWING_DESIGN/rtl/lvds_subsys/top/lvds_subsys.sv" ]; then
-  say "[9/13] LVDS 链路验收 TB:芯片 lvds 树不可达,跳过"
+  say "[9/14] LVDS 链路验收 TB:芯片 lvds 树不可达,跳过"
 else
-  say "[9/13] LVDS 链路验收 TB(链主机 + 两份芯片原版 lvds_subsys 对打,T1-T4)"
+  say "[9/14] LVDS 链路验收 TB(链主机 + 两份芯片原版 lvds_subsys 对打,T1-T4)"
   if sh "$TJ_CTRL_HOME/tb/lnk/run_lnk_tb.sh" "$WORK/lnk" > "$WORK/lnk_run.log" 2>&1; then
     say "    $(grep -E '(LNK|CFGCHAIN) TB PASS' "$WORK/lnk_run.log")"
   else
@@ -308,7 +310,7 @@ data_runs() {
 
 # SEND path test.
 echo
-say "[10/13] SEND path test"
+say "[10/14] SEND path test"
 mkdir -p "$WORK/send"
 IMG_ARG=""
 [ -f "$WORK/image/out/send_image.bin" ] && IMG_ARG="+IMG=$WORK/image/out/send_image.bin"
@@ -320,13 +322,14 @@ if ( cd "$WORK/send" && \
   log_clean "$WORK/send/build.log"; then
   data_runs "$WORK/send" "SEND TB" run "$DSEEDS" $IMG_ARG
   data_runs "$WORK/send" "SEND TB" run_delivery default +TJ_PCLK_HP=2.0 +TJ_MAXI_HP=10.0
+  data_runs "$WORK/send" "SEND TB" run_boundary default +TJ_PCLK_HP=50.0 +TJ_MAXI_HP=5.0
 else
   bad "SEND TB build failed (see $WORK/send/build.log)"
 fi
 
 # RECV path test.
 echo
-say "[11/13] RECV path test"
+say "[11/14] RECV path test"
 mkdir -p "$WORK/recv"
 if ( cd "$WORK/recv" && \
   vlogan -full64 -sverilog -nc -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
@@ -335,12 +338,13 @@ if ( cd "$WORK/recv" && \
   log_clean "$WORK/recv/build.log"; then
   data_runs "$WORK/recv" "RECV TB" run "$DSEEDS"
   data_runs "$WORK/recv" "RECV TB" run_delivery default +TJ_PCLK_HP=2.0 +TJ_MAXI_HP=10.0
+  data_runs "$WORK/recv" "RECV TB" run_boundary default +TJ_PCLK_HP=50.0 +TJ_MAXI_HP=5.0
 else
   bad "RECV TB build failed (see $WORK/recv/build.log)"
 fi
 
 # BOOT data loading through SPI, at all three clock ratios.
-say "[12/13] BOOT engine test"
+say "[12/14] BOOT engine test"
 mkdir -p "$WORK/boot"
 if ( cd "$WORK/boot" && \
   vlogan -full64 -sverilog -nc +define+TJ_ASSERT_ON -timescale=1ns/1ps -f "$TJ_CTRL_HOME/flist/tj_ctrl.f" \
@@ -357,7 +361,7 @@ fi
 
 # SPI slave framing and APB arbitration.
 echo
-say "[13/13] Bypass SPI slave test"
+say "[13/14] Bypass SPI slave test"
 mkdir -p "$WORK/bypass"
 if ( cd "$WORK/bypass" && \
   vlogan -full64 -sverilog -nc +define+TJ_ASSERT_ON -timescale=1ns/1ps \
@@ -398,6 +402,49 @@ if ( cd "$WORK/bypass" && \
 else
   bad "Bypass CSR test failed (see $WORK/bypass/build_csr.log and run_csr.log)"
 fi
+
+# CDC sampling-delay model: each data-path test uses all three clock ratios.
+echo
+say "[14/14] CDC jitter tests"
+mkdir -p "$WORK/jit"
+cdc_ports() {
+  awk '/^[[:space:]]*\/\//{next}
+       /^module /{m=$2; sub(/[ #(].*/,"",m); print "module " m; h=1; next}
+       h && /\);/ {h=0}
+       h && /(parameter|input|output)/ {l=$0; sub(/\/\/.*/,"",l); sub(/=.*/,"",l);
+         gsub(/[[:space:]]+/," ",l); sub(/,[ ]*$/,"",l); sub(/^ /,"",l); sub(/ $/,"",l); print "  " l}' "$1"
+}
+cdc_ports "$TJ_CTRL_HOME/rtl/common/tj_cdc.sv"    > "$WORK/jit/ports_rtl.txt"
+cdc_ports "$TJ_CTRL_HOME/tb/common/tj_cdc_jit.sv" > "$WORK/jit/ports_jit.txt"
+if [ -s "$WORK/jit/ports_rtl.txt" ] && diff "$WORK/jit/ports_rtl.txt" "$WORK/jit/ports_jit.txt" > "$WORK/jit/ports.diff" 2>&1; then
+  :
+else
+  bad "CDC model module/port mismatch (see $WORK/jit/ports.diff)"
+fi
+grep -v '^[[:space:]]*//' "$TJ_CTRL_HOME/flist/tj_ctrl.f" | grep -v '^[[:space:]]*$' \
+  | sed "s|\${TJ_CTRL_HOME}/rtl/common/tj_cdc.sv|$TJ_CTRL_HOME/tb/common/tj_cdc_jit.sv|" \
+  > "$WORK/jit/jit.f"
+grep -q 'tj_cdc_jit.sv' "$WORK/jit/jit.f" || bad "CDC model file-list replacement failed"
+
+for tb in send recv boot; do
+  tb_name=$(printf '%s' "$tb" | tr a-z A-Z)
+  extra=""
+  defines=""
+  [ "$tb" = boot ] && extra="$YAWING_DESIGN/rtl/mcu_subsys/spi/spi2ahb.v" && defines="+define+TJ_ASSERT_ON"
+  [ "$tb" = send ] && extra="$TJ_CTRL_HOME/tb/send/tj_send_verification_top.sv"
+  mkdir -p "$WORK/jit/$tb"
+  if ( cd "$WORK/jit/$tb" &&
+    vlogan -full64 -sverilog -nc $defines -timescale=1ns/1ps -f "$WORK/jit/jit.f" \
+      $extra "$TJ_CTRL_HOME/tb/$tb/tb_tj_$tb.sv" &&
+    vcs -full64 -nc "tb_tj_$tb" -o simv ) > "$WORK/jit/$tb/build.log" 2>&1 &&
+    log_clean "$WORK/jit/$tb/build.log"; then
+    data_runs "$WORK/jit/$tb" "$tb_name TB" run          "$JSEEDS" +TJ_PCLK_HP=5.0  +TJ_MAXI_HP=1.2
+    data_runs "$WORK/jit/$tb" "$tb_name TB" run_delivery "$JSEEDS" +TJ_PCLK_HP=2.0  +TJ_MAXI_HP=10.0
+    data_runs "$WORK/jit/$tb" "$tb_name TB" run_boundary "$JSEEDS" +TJ_PCLK_HP=50.0 +TJ_MAXI_HP=5.0
+  else
+    bad "CDC jitter $tb_name build failed (see $WORK/jit/$tb/build.log)"
+  fi
+done
 
 # Overall result.
 echo

@@ -6,7 +6,7 @@
 ## FPGA 实现
 
 同一份 `tj_send_fetch.sv` 在 Quartus Prime Pro 24.3 的两个 `tj_ctrl_top` 虚拟引脚工程中得到以下结果。
-数据取自 2026-11-02 的 `controller.fit.rpt`，`Fitter RAM Summary` 中的 `u_send|u_fetch|mem_q_rtl_0`。
+数据取自2026-11-08的250/50MHz构建，`tjctrl.fit.place.rpt`的`Fitter RAM Summary`；RTL基线为65b24eaa。
 
 | 目标器件 | 综合后的深度 × 宽度 | 存储资源 |
 |---|---|---|
@@ -27,7 +27,7 @@ SpyGlass 回归将 `mthresh` 设为 131072，使该 32768 位阵列参与 lint �
 脚本会打印实际路径。也可以传入一个新目录或空目录。如果指定的目录已有内容，脚本会退出并保留原文件。
 
 ```sh
-sh controller/scripts/run_quartus_ooc.sh
+MAXI_NS=20.0 sh controller/scripts/run_quartus_ooc.sh
 ```
 
 默认目标为 Cyclone 10 GX `10CX220YF672E5G`，顶层端口使用虚拟引脚。`FAM` 和 `DEV` 选择器件，
@@ -40,5 +40,5 @@ FAM="Agilex 7" DEV=AGIB041R29D1E2VB PCLK_NS=4.0 MAXI_NS=20.0 \
   sh controller/scripts/run_quartus_ooc.sh
 ```
 
-2026-08-12 的 Agilex 7 和 Cyclone 10 GX 块级工程均按 250/100 MHz 运行。
-两款器件的综合、资源和时序摘要见[历史 Quartus 报告](evidence/README.md)。
+2026-11-08的两款器件构建均采用250/50MHz，结果见[Quartus块级构建报告](evidence/README.md)。
+这些结果对应虚拟引脚工程；完整系统和板级接口仍按实际集成约束验证。

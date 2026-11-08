@@ -1,4 +1,4 @@
-Fitter Status : Successful - Wed Aug 12 20:27:38 2026
+Fitter Status : Successful - Sun Nov  8 09:10:40 2026
 Quartus Prime Version : 24.3.0 Build 212 11/18/2024 SC Pro Edition
 Revision Name : tjctrl
 Top-level Entity Name : tj_ctrl_top
@@ -7,10 +7,10 @@ Device : AGIB041R29D1E2VB
 Timing Models : Final
 Power Models : Final
 Device Status : Preliminary
-Logic utilization (in ALMs) : 7,255 / 1,356,160 ( < 1 % )
+Logic utilization (in ALMs) : 7,341 / 1,356,160 ( < 1 % )
   * Logic utilization warning : A large number of ALMs contain virtual pins and count towards logic utilization
   * ALMs containing virtual pins : 886 / 1,356,160 ( < 1 % )
-Total dedicated logic registers : 10598
+Total dedicated logic registers : 10627
 Total pins : 0 / 1,046 ( 0 % )
 Total block memory bits : 27,136 / 350,945,280 ( < 1 % )
 Total RAM Blocks : 3 / 17,136 ( < 1 % )
