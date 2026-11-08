@@ -1,7 +1,19 @@
 #!/bin/sh
 # Build and run LVDS packet and configuration-chain tests.
 # Usage: sh run_lnk_tb.sh [build_dir [seed ...]]
+# LNK_TESTS selects lnk/cfgchain; LNK_CASES and CFGCHAIN_CASES select scenes.
 set -eu
+LNK_TESTS=${LNK_TESTS:-"lnk cfgchain"}
+for lnk_test in $LNK_TESTS; do
+  case "$lnk_test" in
+    lnk|cfgchain) ;;
+    *) printf 'Unknown LNK_TESTS module: %s\n' "$lnk_test" >&2; exit 2 ;;
+  esac
+done
+lnk_selected() {
+  case " $LNK_TESTS " in *" $1 "*) return 0 ;; esac
+  return 1
+}
 
 lnk_script=$(readlink -f "$0")
 lnk_here=$(dirname "$lnk_script")
@@ -52,9 +64,9 @@ run_checked() {
 
 printf 'Build directory: %s\n' "$lnk_work"
 cd "$lnk_work"
-vlogan -full64 -sverilog -timescale=1ps/1fs +error+5000 \
+vlogan -full64 -sverilog "+incdir+$lnk_ctrl/tb/common" -timescale=1ps/1fs +error+5000 \
   +define+FOR_SIM_ONLY +define+RTL -f "$lnk_here/lvds_files.f" > vlogan_chip.log 2>&1
-vlogan -full64 -sverilog -timescale=1ps/1fs +error+5000 \
+vlogan -full64 -sverilog "+incdir+$lnk_ctrl/tb/common" -timescale=1ps/1fs +error+5000 \
   +define+FOR_SIM_ONLY +define+RTL \
   "$lnk_ctrl/rtl/pkg/tj_ctrl_pkg.sv" \
   "$lnk_ctrl/rtl/pkg/tj_ctrl_if.sv" \
@@ -64,19 +76,31 @@ vlogan -full64 -sverilog -timescale=1ps/1fs +error+5000 \
   "$lnk_ctrl/rtl/lnk/tj_lnk_plugs.sv" \
   "$lnk_here/tb_tj_lnk.sv" \
   "$lnk_here/tb_tj_cfgchain.sv" > vlogan_tb.log 2>&1
-vcs -full64 -top tb_tj_lnk -o simv_lnk > vcs_lnk.log 2>&1
-vcs -full64 -top tb_tj_cfgchain -o simv_cfgchain > vcs_cfgchain.log 2>&1
+if lnk_selected lnk; then
+    vcs -full64 -top tb_tj_lnk -o simv_lnk > vcs_lnk.log 2>&1
+  fi
+  if lnk_selected cfgchain; then
+    vcs -full64 -top tb_tj_cfgchain -o simv_cfgchain > vcs_cfgchain.log 2>&1
+  fi
 
-for lnk_mode in 211f 210f; do
-  for lnk_seed in "$@"; do
-    if [ "$lnk_mode" = 210f ]; then
-      run_checked "lnk_${lnk_mode}_${lnk_seed}.log" LNK \
-        ./simv_lnk -nc "+ntb_random_seed=$lnk_seed" +GRP210F
-    else
-      run_checked "lnk_${lnk_mode}_${lnk_seed}.log" LNK \
-        ./simv_lnk -nc "+ntb_random_seed=$lnk_seed"
-    fi
+  if lnk_selected lnk; then
+  for lnk_mode in 211f 210f; do
+    for lnk_seed in "$@"; do
+      if [ "$lnk_mode" = 210f ]; then
+        run_checked "lnk_${lnk_mode}_${lnk_seed}.log" LNK \
+          ./simv_lnk -nc ${LNK_CASES:+"+TJ_CASES=$LNK_CASES"} "+ntb_random_seed=$lnk_seed" +GRP210F
+      else
+        run_checked "lnk_${lnk_mode}_${lnk_seed}.log" LNK \
+          ./simv_lnk -nc ${LNK_CASES:+"+TJ_CASES=$LNK_CASES"} "+ntb_random_seed=$lnk_seed"
+      fi
+    done
   done
-done
-run_checked cfgchain_100mhz.log CFGCHAIN ./simv_cfgchain -nc +TJ_PCLK_HP=5.0
-run_checked cfgchain_250mhz.log CFGCHAIN ./simv_cfgchain -nc +TJ_PCLK_HP=2.0
+else
+  printf "%s\n" "SKIP lnk (not selected)"
+fi
+if lnk_selected cfgchain; then
+  run_checked cfgchain_100mhz.log CFGCHAIN ./simv_cfgchain -nc ${CFGCHAIN_CASES:+"+TJ_CASES=$CFGCHAIN_CASES"} +TJ_PCLK_HP=5.0
+  run_checked cfgchain_250mhz.log CFGCHAIN ./simv_cfgchain -nc ${CFGCHAIN_CASES:+"+TJ_CASES=$CFGCHAIN_CASES"} +TJ_PCLK_HP=2.0
+else
+  printf "%s\n" "SKIP cfgchain (not selected)"
+fi

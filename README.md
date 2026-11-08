@@ -109,6 +109,40 @@ regress_work=$(mktemp -d /tmp/tj_ctrl_regress.XXXXXX)
 REGRESS_WORK="$regress_work" sh controller/scripts/run_regress.sh
 ```
 
+不设置选择参数时仍执行原有完整流程。按需运行时，用REGRESS_TESTS选择阶段，
+用各模块的场景变量选择P/T/C编号；名称区分大小写，场景按原顺序执行。
+
+~~~sh
+REGRESS_TESTS=send SEND_CASES=P13 REGRESS_WORK=/tmp/tj_send_p13 \
+  sh controller/scripts/run_regress.sh
+REGRESS_TESTS="recv boot" RECV_CASES=P10,P11 BOOT_CASES=P11 \
+  REGRESS_WORK=/tmp/tj_recv_boot sh controller/scripts/run_regress.sh
+~~~
+
+| 阶段名称 | 场景变量 | 可选场景 |
+|---|---|---|
+| send | SEND_CASES | P1～P13 |
+| recv | RECV_CASES | P1～P11 |
+| boot | BOOT_CASES | P1～P11 |
+| spi | SPI_CASES | T1～T14；T2含T2b，T4含T4b |
+| bypass | BYPASS_CASES | P1～P17 |
+| bypass_disabled | — | 关闭旁路的完整测例 |
+| bypass_csr | BYPASS_CSR_CASES | C1～C7 |
+| lnk | LNK_CASES | T1～T4 |
+| cfgchain | CFGCHAIN_CASES | P1～P4 |
+| jitter | 同SEND/RECV/BOOT场景变量 | JITTER_TESTS选择send、recv、boot，默认三者 |
+| gen、csr、top、apb_smoke、static、image、init | — | 按整个阶段选择 |
+
+只设置SEND_CASES等场景变量不会关闭其他阶段；只测SEND时还需设置REGRESS_TESTS=send。
+REGRESS_TESTS支持空格或逗号分隔；场景变量使用逗号分隔，例如P1,P13。未设置某模块的
+场景变量时，该模块保持原完整顺序。显式选择P2时通过SEND_IMG指定二进制镜像；
+默认全跑时P2仍只在有镜像时执行。现有时钟档位、种子及SKIP开关仍然生效。
+
+选择场景通过仿真参数+TJ_CASES传递，无需修改RTL或重新配置编译宏。
+日志使用CASE RUN、CASE SKIP和CASE SETUP列出执行、跳过及必要的准备动作。
+链路T3依赖链路配置，T4还依赖收发流量；缺少前序场景时自动执行这些准备步骤。
+旁路P14～P17分别为慢写停止、读欠载停止预取、APB错误终止、暂停SCLK访问慢目标。
+
 该入口运行生成物一致性、CSR、SPI、顶层展开、APB冒烟、lint和CDC结构检查、镜像工具与格式、
 初始化重放、LVDS链路、SEND、RECV、BOOT和旁路SPI检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 和旁路种子，
 `DSEEDS` 控制 SEND、RECV、BOOT 种子，默认 `default 31 166 7`；BOOT 每档时钟都运行这些种子。

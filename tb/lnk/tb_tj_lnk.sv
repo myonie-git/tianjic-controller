@@ -5,6 +5,7 @@
 // Compile chip RTL with FOR_SIM_ONLY and a 1 ps / 1 fs timescale.
 
 module tb_tj_lnk;
+  `include "tj_case_select.svh"
   import tj_ctrl_pkg::*;
 
   // Independent data clocks; both configuration ports use clk_a.
@@ -175,43 +176,8 @@ module tb_tj_lnk;
   logic [31:0] rd32;
   logic [95:0] pkt;
 
-  initial begin
-    db_go = 0;
-    kind = '0;
-    inst = '0;
-    wdata = '0;
-    a_sv = '0;
-    a_sd = '0;
-    b_sv = '0;
-    b_sd = '0;
-    #1us rstn = 1;
-    #2us;
-
-    // T1: Instance selection, register readback and idle-paced writes.
-    chk(a_idn === 2'd1 && b_idn === 2'd2, "Chained instance IDs");
-    cc_write(2'd0, 25'h64, 32'h0000_1234);
-    cc_read (2'd0, 25'h64, rd32);
-    chk(rd32[15:0] === 16'h1234, $sformatf("Instance 0 readback: %h", rd32));
-    cc_write(2'd1, 25'h64, 32'h0000_2345);
-    cc_read (2'd1, 25'h64, rd32);
-    chk(rd32[15:0] === 16'h2345, $sformatf("Instance 1 readback: %h", rd32));
-    cc_read (2'd0, 25'h64, rd32);
-    chk(rd32[15:0] === 16'h1234, "Instance 0 remains unchanged");
-
-    for (int i = 0; i < 2; i++) begin
-      logic [15:0] expected;
-      expected = (i == 0) ? 16'h3456 : 16'h4567;
-      saw_dvld = 0;
-      cc_op_when_idle(2'd0, 2'(i), 32'h64);
-      cc_op_when_idle(2'd1, 2'(i), {16'h0, expected});
-      while (busy) @(negedge clk_a);
-      chk(!saw_dvld, $sformatf("inst%0d write must not set DVLD", i));
-      cc_read(2'(i), 25'h64, rd32);
-      chk(rd32[15:0] === expected,
-          $sformatf("inst%0d idle-paced write: got %h, expected %h", i, rd32, expected));
-    end
-
-    // T2: Configure three physical links and enable packet traffic.
+  bit links_ready = 0, traffic_checked = 0;
+  task automatic configure_links;
     for (int i = 0; i < 2; i++) begin
       cc_write(2'(i), 25'h04, GRP_PARAM);
       cc_write(2'(i), 25'h24, GRP_PARAM);
@@ -233,8 +199,10 @@ module tb_tj_lnk;
     end
     a_err_seen = 0;
     b_err_seen = 0;
+    links_ready = 1;
+  endtask
 
-    // T3: Exercise all four logical ports in both directions.
+  task automatic exercise_links;
     for (int p = 0; p < 4; p++) begin
       for (int n = 0; n < N_PKT; n++) begin
 
@@ -276,13 +244,78 @@ module tb_tj_lnk;
         chk(gq[n] === eq[n],
             $sformatf("B to A port %0d packet %0d: %h vs %h", p, n, gq[n], eq[n]));
     end
+    traffic_checked = 1;
+  endtask
+
+  initial begin
+    tj_cases_init("T1,T2,T3,T4");
+    db_go = 0;
+    kind = '0;
+    inst = '0;
+    wdata = '0;
+    a_sv = '0;
+    a_sd = '0;
+    b_sv = '0;
+    b_sd = '0;
+    #1us rstn = 1;
+    #2us;
+
+    // T1: Instance selection, register readback and idle-paced writes.
+    if (tj_run_case("T1")) begin
+      chk(a_idn === 2'd1 && b_idn === 2'd2, "Chained instance IDs");
+      cc_write(2'd0, 25'h64, 32'h0000_1234);
+      cc_read (2'd0, 25'h64, rd32);
+      chk(rd32[15:0] === 16'h1234, $sformatf("Instance 0 readback: %h", rd32));
+      cc_write(2'd1, 25'h64, 32'h0000_2345);
+      cc_read (2'd1, 25'h64, rd32);
+      chk(rd32[15:0] === 16'h2345, $sformatf("Instance 1 readback: %h", rd32));
+      cc_read (2'd0, 25'h64, rd32);
+      chk(rd32[15:0] === 16'h1234, "Instance 0 remains unchanged");
+
+      for (int i = 0; i < 2; i++) begin
+        logic [15:0] expected;
+        expected = (i == 0) ? 16'h3456 : 16'h4567;
+        saw_dvld = 0;
+        cc_op_when_idle(2'd0, 2'(i), 32'h64);
+        cc_op_when_idle(2'd1, 2'(i), {16'h0, expected});
+        while (busy) @(negedge clk_a);
+        chk(!saw_dvld, $sformatf("inst%0d write must not set DVLD", i));
+        cc_read(2'(i), 25'h64, rd32);
+        chk(rd32[15:0] === expected,
+            $sformatf("inst%0d idle-paced write: got %h, expected %h", i, rd32, expected));
+      end
+    end
+
+    // T2: Configure three physical links and enable packet traffic.
+    if (tj_run_case("T2")) begin
+      configure_links();
+    end
+
+    // T3: Exercise all four logical ports in both directions.
+    if (tj_run_case("T3")) begin
+      if (!links_ready) begin
+        $display("CASE SETUP T2 for T3");
+        configure_links();
+      end
+      exercise_links();
+    end
 
     // T4: Check latched error events and both error-status registers.
-    chk(!a_err_seen && !b_err_seen, "No error interrupt during packet traffic");
-    cc_read(2'd0, 25'h204, rd32);
-    chk(rd32 === 32'h0, $sformatf("A.ERR_ST must be zero: %h", rd32));
-    cc_read(2'd1, 25'h204, rd32);
-    chk(rd32 === 32'h0, $sformatf("B.ERR_ST must be zero: %h", rd32));
+    if (tj_run_case("T4")) begin
+      if (!links_ready) begin
+        $display("CASE SETUP T2 for T4");
+        configure_links();
+      end
+      if (!traffic_checked) begin
+        $display("CASE SETUP T3 for T4");
+        exercise_links();
+      end
+      chk(!a_err_seen && !b_err_seen, "No error interrupt during packet traffic");
+      cc_read(2'd0, 25'h204, rd32);
+      chk(rd32 === 32'h0, $sformatf("A.ERR_ST must be zero: %h", rd32));
+      cc_read(2'd1, 25'h204, rd32);
+      chk(rd32 === 32'h0, $sformatf("B.ERR_ST must be zero: %h", rd32));
+    end
 
     if (checks > 0 && errs == 0) $display("LNK TB PASS (%0d checks)", checks);
     else           $display("LNK TB FAIL (%0d/%0d)", errs, checks);

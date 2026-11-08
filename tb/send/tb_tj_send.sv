@@ -3,6 +3,7 @@
 // Description : Test SEND through APB, an AXI read model and LVDS sinks.
 `timescale 1ns/1ps
 module tb_tj_send;
+  `include "tj_case_select.svh"
   // Expected TX record format, independent of the DUT package.
   localparam logic [7:0] REC_LAST  = 8'h01;
   localparam logic [7:0] REC_FENCE = 8'h02;
@@ -318,6 +319,7 @@ module tb_tj_send;
   time          t_pre_max;
 
   initial begin
+    tj_cases_init("P1,P2,P3,P4,P5,P6,P7,P8,P9,P10,P11,P12,P13");
     $display("CLOCK half-periods: pclk=%0.3f ns maxi=%0.3f ns", pclk_hp, maxi_hp);
     psel = 0; penable = 0; pwrite = 0; paddr = '0; pwdata = '0;
     port_block = '0;
@@ -326,371 +328,404 @@ module tb_tj_send;
     presetn = 1; maxi_rstn = 1;
     #(200ns * clock_scale());
 
+    if (tj_case_filter_active) begin
+      // P1 normally enables the channels for the following scenes.
+      apb_wr(A_LNK_EN, 32'h007);
+    end
+
     // P1: Send 60 mixed-channel records under random backpressure.
-    clr_expect();
-    apb_wr(A_LNK_EN, 32'h007);
-    recs.delete();
-    // No record IRQ: RAW[9] must be set by task completion.
-    for (int i = 0; i < 60; i++)
-      recs.push_back(mk_rec(16'(i), (i == 59) ? REC_LAST : 8'h0,
-                            8'($urandom_range(0, 2)), rnd_pkt()));
-    load_table(TBL_BASE, recs);
-    run_table(TBL_BASE, 60, "P1");
-    apb_rd(A_IRQ_RAW, v);
-    chk(v[9], "P1: RAW[9] 完成事件");
-    apb_wr(A_IRQ_RAW, 32'h0000_0200);
-    $display("P1 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P1")) begin
+      clr_expect();
+      apb_wr(A_LNK_EN, 32'h007);
+      recs.delete();
+      // No record IRQ: RAW[9] must be set by task completion.
+      for (int i = 0; i < 60; i++)
+        recs.push_back(mk_rec(16'(i), (i == 59) ? REC_LAST : 8'h0,
+                              8'($urandom_range(0, 2)), rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      run_table(TBL_BASE, 60, "P1");
+      apb_rd(A_IRQ_RAW, v);
+      chk(v[9], "P1: RAW[9] 完成事件");
+      apb_wr(A_IRQ_RAW, 32'h0000_0200);
+      $display("P1 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P2: Replay a record image supplied with +IMG.
-    if ($value$plusargs("IMG=%s", img_path)) begin
-      clr_expect();
-      fd = $fopen(img_path, "rb");
-      chk(fd != 0, "P2: 镜像打开失败");
-      if (fd != 0) begin
-        int n;
-        n = $fread(img_bytes, fd);
-        $fclose(fd);
-        n_img = n / 16;
-        chk(n_img > 0 && (n % 16) == 0, $sformatf("P2: 镜像 %0d 字节非 16B 整数倍", n));
-        recs.delete();
-        for (int i = 0; i < n_img; i++) begin
-          logic [127:0] r;
-          // Little-endian 16-byte records.
-          for (int b = 0; b < 16; b++) r[8*b +: 8] = img_bytes[i*16 + b];
-          recs.push_back(r);
+    if (tj_run_case("P2")) begin
+      if ($value$plusargs("IMG=%s", img_path)) begin
+        clr_expect();
+        fd = $fopen(img_path, "rb");
+        chk(fd != 0, "P2: 镜像打开失败");
+        if (fd != 0) begin
+          int n;
+          n = $fread(img_bytes, fd);
+          $fclose(fd);
+          n_img = n / 16;
+          chk(n_img > 0 && (n % 16) == 0, $sformatf("P2: 镜像 %0d 字节非 16B 整数倍", n));
+          recs.delete();
+          for (int i = 0; i < n_img; i++) begin
+            logic [127:0] r;
+            // Little-endian 16-byte records.
+            for (int b = 0; b < 16; b++) r[8*b +: 8] = img_bytes[i*16 + b];
+            recs.push_back(r);
+          end
+          load_table(TBL_BASE, recs);
+          run_table(TBL_BASE, n_img, "P2");
+          $display("P2 done: %0d 镜像记录重放 (%0d checks, %0d errs)", n_img, checks, errs);
         end
-        load_table(TBL_BASE, recs);
-        run_table(TBL_BASE, n_img, "P2");
-        $display("P2 done: %0d 镜像记录重放 (%0d checks, %0d errs)", n_img, checks, errs);
+      end else begin
+        if (tj_case_filter_active) $fatal(1, "Selected P2 requires +IMG");
+        $display("P2 skip(无 +IMG)");
       end
-    end else begin
-      $display("P2 skip(无 +IMG)");
     end
 
     // P3: Block one packet on port 0; FENCE must delay the next packet on port 1.
-    clr_expect();
-    port_block[0] = 1'b1;
-    recs.delete();
-    recs.push_back(mk_rec(16'h0, 8'h0, 8'd0, rnd_pkt()));
-    recs.push_back(mk_rec(16'h100, REC_FENCE, 8'd1, rnd_pkt()));
-    for (int i = 0; i < 2; i++) recs.push_back(mk_rec(16'(i), 8'h0, 8'd1, rnd_pkt()));
-    recs.push_back(mk_rec(16'hFFF, REC_LAST, 8'd2, rnd_pkt()));
-    load_table(TBL_BASE, recs);
-    start_table(TBL_BASE, recs.size());
-    #(3us * clock_scale());                 // Hold port 0 while FENCE is pending.
-    chk(got_d[1].size() == 0, "P3: fence 前口1 不得先行");
-    port_block[0] = 1'b0;
-    for (int t = 0; t < apb_poll_limit(2000); t++) begin apb_rd(A_STA, v); if (v[8]) break; end
-    chk(v[8], "P3: DONE 超时");
-    apb_wr(A_STA, 32'h300);
-    t_pre_max = 0;
-    foreach (got_t[0][i]) if (got_t[0][i] > t_pre_max) t_pre_max = got_t[0][i];
-    chk(got_d[1].size() > 0 && got_t[1][0] > t_pre_max,
-        "P3: fence 包接受时刻晚于全部前序包");
-    check_ports("P3");
-    $display("P3 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P3")) begin
+      clr_expect();
+      port_block[0] = 1'b1;
+      recs.delete();
+      recs.push_back(mk_rec(16'h0, 8'h0, 8'd0, rnd_pkt()));
+      recs.push_back(mk_rec(16'h100, REC_FENCE, 8'd1, rnd_pkt()));
+      for (int i = 0; i < 2; i++) recs.push_back(mk_rec(16'(i), 8'h0, 8'd1, rnd_pkt()));
+      recs.push_back(mk_rec(16'hFFF, REC_LAST, 8'd2, rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      start_table(TBL_BASE, recs.size());
+      #(3us * clock_scale());                 // Hold port 0 while FENCE is pending.
+      chk(got_d[1].size() == 0, "P3: fence 前口1 不得先行");
+      port_block[0] = 1'b0;
+      for (int t = 0; t < apb_poll_limit(2000); t++) begin apb_rd(A_STA, v); if (v[8]) break; end
+      chk(v[8], "P3: DONE 超时");
+      apb_wr(A_STA, 32'h300);
+      t_pre_max = 0;
+      foreach (got_t[0][i]) if (got_t[0][i] > t_pre_max) t_pre_max = got_t[0][i];
+      chk(got_d[1].size() > 0 && got_t[1][0] > t_pre_max,
+          "P3: fence 包接受时刻晚于全部前序包");
+      check_ports("P3");
+      $display("P3 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P4: Stop at record 13 marked LAST, with CNT set to 20.
-    clr_expect();
-    recs.delete();
-    for (int i = 0; i < 20; i++)
-      recs.push_back(mk_rec(16'(i), (i == 12) ? REC_LAST : 8'h0,
-                            8'($urandom_range(0, 2)), rnd_pkt()));
-    load_table(TBL_BASE, recs);
-    run_table(TBL_BASE, 20, "P4");
-    chk(exp_sent == 13, "P4: 金标准自检(13 条)");
-    $display("P4 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P4")) begin
+      clr_expect();
+      recs.delete();
+      for (int i = 0; i < 20; i++)
+        recs.push_back(mk_rec(16'(i), (i == 12) ? REC_LAST : 8'h0,
+                              8'($urandom_range(0, 2)), rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      run_table(TBL_BASE, 20, "P4");
+      chk(exp_sent == 13, "P4: 金标准自检(13 条)");
+      $display("P4 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P5: Report the sixth record IRQ while the task is still busy.
-    clr_expect();
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);       // Clear pending IRQ events.
-    recs.delete();
-    for (int i = 0; i < 400; i++)
-      recs.push_back(mk_rec(16'(i), (i == 5) ? REC_IRQ
-                                  : (i == 399) ? REC_LAST : 8'h0,
-                            8'($urandom_range(0, 2)), rnd_pkt()));
-    load_table(TBL_BASE, recs);
-    start_table(TBL_BASE, 400);
-    v2 = 0;
-    for (int t = 0; t < apb_poll_limit(5000); t++) begin
-      apb_rd(A_IRQ_RAW, v);
-      if (v[9]) begin apb_rd(A_GLB_STA, v2); break; end
-    end
-    chk(v[9], "P5: RAW[9] irq 标志事件");
-    chk(v2[9], "P5: irq 到达时 GLB.STA.SEND_BUSY 仍在(证明中途报)");
-    for (int t = 0; t < apb_poll_limit(5000); t++) begin apb_rd(A_STA, v); if (v[8]) break; end
-    chk(v[8], "P5: DONE 超时");
-    apb_wr(A_STA, 32'h300); apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    check_ports("P5");
-    $display("P5 done (%0d checks, %0d errs)", checks, errs);
-
-    // P6: Disable channel 1 and include an invalid channel 13 record.
-    clr_expect();
-    apb_wr(A_LNK_EN, 32'h005);  sh_en = 12'h005;
-    recs.delete();
-    for (int i = 0; i < 30; i++)
-      recs.push_back(mk_rec(16'(i), 8'h0, 8'($urandom_range(0, 2)), rnd_pkt()));
-    recs.push_back(mk_rec(16'h666, 8'h0, 8'd13, rnd_pkt()));      // Invalid channel.
-    recs.push_back(mk_rec(16'h667, REC_LAST, 8'd0, rnd_pkt()));
-    load_table(TBL_BASE, recs);
-    run_table(TBL_BASE, recs.size(), "P6");
-    chk(exp_err, "P6: 金标准自检(应有 ERR)");
-    apb_wr(A_LNK_EN, 32'h007);  sh_en = 12'h007;
-    $display("P6 done (%0d checks, %0d errs)", checks, errs);
-
-    // P7: Swap channel 0 and channel 2 mappings.
-    clr_expect();
-    apb_wr(A_REMAP0, 32'h7654_3012);  sh_remap = 48'hBA98_7654_3012;
-    recs.delete();
-    for (int i = 0; i < 24; i++)
-      recs.push_back(mk_rec(16'(i), (i == 23) ? REC_LAST : 8'h0,
-                            8'($urandom_range(0, 2)), rnd_pkt()));
-    load_table(TBL_BASE, recs);
-    run_table(TBL_BASE, 24, "P7");
-    apb_wr(A_REMAP0, 32'h7654_3210);  sh_remap = 48'hBA98_7654_3210;
-    $display("P7 done (%0d checks, %0d errs)", checks, errs);
-
-    // P8: Abort on an AXI read error, then start another task.
-    clr_expect();
-    recs.delete();
-    for (int i = 0; i < 10; i++)
-      recs.push_back(mk_rec(16'(i), 8'h0, 8'd0, rnd_pkt()));
-    // No packets expected from failed reads.
-    foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
-    exp_err = 1;                                                  // Expect the AXI read error.
-    run_table(ERR_BASE, 10, "P8a");
-    chk(exp_sent == 0, "P8a: 金标准自检(0 发送)");
-    // Check that a new task can report an error after an AXI failure.
-    clr_expect();
-    recs.delete();
-    for (int i = 0; i < 4; i++)
-      recs.push_back(mk_rec(16'(i), 8'h0, 8'($urandom_range(0, 2)), rnd_pkt()));
-    // Invalid channel must report an error.
-    recs.push_back(mk_rec(16'h666, 8'h0, 8'd13, rnd_pkt()));
-    for (int i = 0; i < 3; i++)
-      recs.push_back(mk_rec(16'(4 + i), (i == 2) ? REC_LAST : 8'h0,
-                            8'($urandom_range(0, 2)), rnd_pkt()));
-    load_table(TBL_BASE, recs);
-    run_table(TBL_BASE, recs.size(), "P8b");
-    chk(exp_err, "P8b: 金标准自检(应有 ERR)");
-    $display("P8 done (%0d checks, %0d errs)", checks, errs);
-
-    // P9: Abort with pending packets, drain each port, then restart.
-    clr_expect();
-    port_block = 4'hF;
-    apb_wr(A_STA, 32'h300);
-    apb_wr(A_IRQ_RAW, 32'h200);
-    recs.delete();
-    // The first three records occupy ports 0..2; only the third requests IRQ.
-    for (int i = 0; i < 50; i++) begin
-      recs.push_back(mk_rec(16'(i), (i == 2) ? REC_IRQ : 8'h00,
-                            8'(i % 3), rnd_pkt()));
-      ddr[(TBL_BASE >> 4) + i] = recs[i];
-      if (i < 3) gold_rec(recs[i]);
-    end
-    start_table(TBL_BASE, 50);
-    for (int t = 0; t < 2000; t++) begin
-      @(negedge maxi_clk);
-      if (lv_tx_tvalid === 4'h7) break;
-    end
-    chk(lv_tx_tvalid === 4'h7, "P9: packets pending on all three ports");
-    p9_pending = 4'h7;
-    p9_hold_ok = 1;
-    p9_no_refill = 1;
-    p9_watch = 1;
-    wait_sent(0, "P9 blocked");
-    apb_rd(A_STA, v); chk(v[0] && !v[8] && !v[9], "P9: busy before abort");
-    apb_rd(A_IRQ_RAW, v); chk(!v[9], "P9: no IRQ before packet acceptance");
-    apb_wr(A_GLB_CTRL, 32'h1);
-
-    // Allow the abort to cross clock domains while all outputs remain blocked.
-    repeat (12) @(negedge maxi_clk);
-    repeat (12) @(negedge pclk);
-    apb_rd(A_STA, v);
-    chk(v[0] && !v[8] && !v[9], "P9: abort retains BUSY without DONE or ERR");
-    for (int p = 0; p < NP; p++)
-      chk(got_d[p].size() == 0, $sformatf("P9: port %0d still blocked", p));
-
-    // Drain the IRQ-marked packet last; earlier packets must not raise IRQ.
-    for (int p = 0; p < 3; p++) begin
-      @(negedge maxi_clk); port_block[p] = 0;
-      for (int t = 0; t < 2000; t++) begin
-        @(negedge maxi_clk);
-        if (got_d[p].size() != 0) break;
-      end
-      chk(got_d[p].size() == 1, $sformatf("P9: port %0d drains one packet", p));
-      wait_sent(p + 1, "P9 drain");
-      if (p < 2) begin
-        apb_rd(A_STA, v);
-        chk(v[0] && !v[8] && !v[9], "P9: BUSY until all pending packets drain");
-        apb_rd(A_IRQ_RAW, v); chk(!v[9], "P9: unmarked packets do not raise IRQ");
-      end
-    end
-    for (int t = 0; t < apb_poll_limit(2000); t++) begin
-      apb_rd(A_STA, v);
-      if (!v[0]) break;
-    end
-    chk(!v[0] && !v[8] && !v[9], "P9: idle after draining, no DONE or ERR");
-    apb_rd(A_IRQ_RAW, v); chk(v[9], "P9: IRQ-marked packet reports during abort drain");
-    repeat (16) @(negedge maxi_clk);
-    chk(p9_pending === '0, "P9: every pending packet accepted");
-    chk(p9_hold_ok, "P9: pending VALID and payload held until acceptance");
-    chk(p9_no_refill, "P9: no new packets after abort");
-    check_ports("P9a");
-    p9_watch = 0;
-    port_block = '0;
-    apb_wr(A_IRQ_RAW, 32'h200);
-    clr_expect();
-    recs.delete();
-    for (int i = 0; i < 8; i++)
-      recs.push_back(mk_rec(16'(i), (i == 7) ? REC_LAST : 8'h0,
-                            8'($urandom_range(0, 2)), rnd_pkt()));
-    load_table(TBL_BASE, recs);
-    run_table(TBL_BASE, 8, "P9b");
-    $display("P9 done (%0d checks, %0d errs)", checks, errs);
-
-    // P10: Boundary split: 4 + 64 + 64 + 9 records, followed by an empty job.
-    clr_expect(); apb_wr(A_LNK_EN, 7); recs.delete();
-    for (int i=0; i<141; i++) recs.push_back(mk_rec(16'(i), 0, 8'(i%3), rnd_pkt()));
-    load_table(48'h10000FC0, recs);
-    watch_boundary = 1; boundary_requests = 0; max_outstanding = 0;
-    run_table(48'h10000FC0, 141, "BOUNDARY");
-    watch_boundary = 0;
-    chk(boundary_requests == 4 && max_outstanding > 1, "boundary split and multiple outstanding exercised");
-    ar0 = total_ar;
-    clr_expect(); run_table(TBL_BASE, 0, "EMPTY");
-    chk(total_ar == ar0, "EMPTY: no memory request");
-
-    // P11: Retain a stalled AR after abort, then drain the accepted burst.
-    clr_expect(); apb_wr(A_IRQ_RAW, 32'hFFFFFFFF);
-    for (int i=0; i<128; i++) ddr[(TBL_BASE>>4)+i] = mk_rec(16'(i),0,0,rnd_pkt());
-    ar0 = total_ar; r0 = total_r; force_ar_block = 1;
-    start_table(TBL_BASE, 128);
-    for (int i=0; i<2000; i++) begin @(negedge maxi_clk); if (arvalid) break; end
-    chk(arvalid && !arready, "ABORT_AR: pending request exists");
-    repeat (8) @(negedge maxi_clk);
-    apb_wr(A_GLB_CTRL,1);
-    repeat (12) @(negedge maxi_clk);
-    repeat (12) @(negedge pclk);
-    chk(arvalid && !arready && total_ar==ar0, "ABORT_AR: stalled request retained after abort");
-    apb_rd(A_STA,v); chk(v[0] && !v[8] && !v[9], "ABORT_AR: remains busy without completion");
-    force_ar_block = 0;
-    for (int i=0; i<apb_poll_limit(2000); i++) begin apb_rd(A_STA,v); if (!v[0]) break; end
-    chk(!v[0] && !v[8] && !v[9], "ABORT_AR: returns idle after draining");
-    chk(total_ar==ar0+1 && total_r==r0+64 && outstanding==0, "ABORT_AR: drains exactly the committed burst");
-    for (int p=0; p<NP; p++) chk(got_d[p].size()==0, "ABORT_AR: no packets transmitted");
-    // P12: LAST in the first burst; drain all later outstanding reads.
-    clr_expect(); recs.delete();
-    for (int i=0; i<300; i++) recs.push_back(mk_rec(16'(i), (i==4)?REC_LAST:8'h00, 8'(i%3),rnd_pkt()));
-    load_table(TBL_BASE,recs); run_table(TBL_BASE,300,"EARLY_LAST_MULTIBURST");
-    chk(exp_sent==5 && outstanding==0,"EARLY_LAST_MULTIBURST: five outputs and all reads drained");
-    $display("P10-P12 done (%0d checks, %0d errs)", checks, errs);
-
-    // P13: Consecutive error and IRQ tasks, polling phases and recovery.
-    // Each fast AXI failure must raise a new error event.
-    ddr_fast = 1'b1;
-    for (int k = 0; k < 3; k++) begin
+    if (tj_run_case("P5")) begin
       clr_expect();
-      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-      recs.delete();
-      recs.push_back(mk_rec(16'(k), REC_LAST, 8'd0, rnd_pkt()));
-      foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
-      exp_err = 1;
-      run_table(ERR_BASE, 1, $sformatf("P13.%0d", k));
-      apb_rd(A_IRQ_RAW, v);
-      chk(v[28], $sformatf("P13.%0d: each AXI error task sets RAW[28]", k));
-    end
-    // Invalid records report errors while valid records continue.
-    for (int k = 0; k < 2; k++) begin
-      clr_expect();
-      recs.delete();
-      recs.push_back(mk_rec(16'h666, 8'h0, 8'd13, rnd_pkt()));
-      recs.push_back(mk_rec(16'h667, REC_LAST, 8'd0, rnd_pkt()));
-      load_table(TBL_BASE, recs);
-      run_table(TBL_BASE, recs.size(), $sformatf("P13r.%0d", k));
-      chk(exp_err, "P13r: test input must require ERR");
-    end
-    // Check ERR in the first DONE read at all four APB polling phases.
-    for (int k = 0; k < 8; k++) begin
-      clr_expect();
-      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-      poll_skew = k % 4;
-      recs.delete();
-      if (k < 4) begin
-        recs.push_back(mk_rec(16'(k), REC_LAST, 8'd0, rnd_pkt()));
-        foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
-        exp_err = 1;
-        run_table(ERR_BASE, 1, $sformatf("P13s.%0d(AXI error, phase %0d)", k, poll_skew));
-        apb_rd(A_IRQ_RAW, v);
-        chk(v[28], $sformatf("P13s.%0d: RAW[28]", k));
-      end else begin
-        recs.push_back(mk_rec(16'h666, 8'h0, 8'd13, rnd_pkt()));
-        recs.push_back(mk_rec(16'h667, REC_LAST, 8'd0, rnd_pkt()));
-        load_table(TBL_BASE, recs);
-        run_table(TBL_BASE, recs.size(), $sformatf("P13s.%0d(invalid record, phase %0d)", k, poll_skew));
-        chk(exp_err, "P13s: test input must require ERR");
-      end
-    end
-    // A successful task must not inherit a previous task's error.
-    poll_skew = 0;
-    clr_expect();
-    recs.delete();
-    recs.push_back(mk_rec(16'h0, REC_LAST, 8'd0, rnd_pkt()));
-    foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
-    exp_err = 1;
-    run_table(ERR_BASE, 1, "P13c.0(AXI error)");
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    clr_expect();
-    recs.delete();
-    for (int i = 0; i < 6; i++)
-      recs.push_back(mk_rec(16'(i), (i == 5) ? REC_LAST : 8'h0,
-                            8'($urandom_range(0, 2)), rnd_pkt()));
-    load_table(TBL_BASE, recs);
-    run_table(TBL_BASE, 6, "P13c.1(valid table)");
-    repeat (16) @(posedge pclk);
-    apb_rd(A_STA, v);
-    chk(!v[9], "P13c: ERR remains clear after a valid task");
-    apb_rd(A_IRQ_RAW, v);
-    chk(!v[28], "P13c: valid task keeps RAW[28] clear");
-    // Each task must report its record IRQ before completion.
-    for (int k = 0; k < 2; k++) begin
-      clr_expect();
-      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);       // Clear pending IRQ events.
       recs.delete();
       for (int i = 0; i < 400; i++)
-        recs.push_back(mk_rec(16'(i), (i == 0) ? REC_IRQ
+        recs.push_back(mk_rec(16'(i), (i == 5) ? REC_IRQ
                                     : (i == 399) ? REC_LAST : 8'h0,
                               8'($urandom_range(0, 2)), rnd_pkt()));
       load_table(TBL_BASE, recs);
-      apb_wr(A_SRC_LO, TBL_BASE[31:0]); apb_wr(A_SRC_HI, {16'h0, TBL_BASE[47:32]});
-      apb_wr(A_CNT, 400); apb_wr(A_DB, 32'h1);
+      start_table(TBL_BASE, 400);
       v2 = 0;
-      for (int t = 0; t < 5000; t++) begin
+      for (int t = 0; t < apb_poll_limit(5000); t++) begin
         apb_rd(A_IRQ_RAW, v);
         if (v[9]) begin apb_rd(A_GLB_STA, v2); break; end
       end
-      chk(v[9], $sformatf("P13i.%0d: IRQ-marked record sets RAW[9]", k));
-      chk(v2[9], $sformatf("P13i.%0d: SEND is still busy when the record IRQ arrives", k));
-      v = 0;
-      for (int t = 0; t < apb_poll_limit(20000); t++) begin
-        apb_rd(A_STA, v);
-        if (v[8]) break;
-      end
-      chk(v[8], $sformatf("P13i.%0d: DONE timeout", k));
-      apb_wr(A_STA, 32'h300);
-      check_ports($sformatf("P13i.%0d", k));
+      chk(v[9], "P5: RAW[9] irq 标志事件");
+      chk(v2[9], "P5: irq 到达时 GLB.STA.SEND_BUSY 仍在(证明中途报)");
+      for (int t = 0; t < apb_poll_limit(5000); t++) begin apb_rd(A_STA, v); if (v[8]) break; end
+      chk(v[8], "P5: DONE 超时");
+      apb_wr(A_STA, 32'h300); apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      check_ports("P5");
+      $display("P5 done (%0d checks, %0d errs)", checks, errs);
     end
-    // Restore random DDR stalls and check normal task completion.
-    ddr_fast = 1'b0;
-    clr_expect();
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    recs.delete();
-    for (int i = 0; i < 6; i++)
-      recs.push_back(mk_rec(16'(i), (i == 5) ? REC_LAST : 8'h0,
-                            8'($urandom_range(0, 2)), rnd_pkt()));
-    load_table(TBL_BASE, recs);
-    run_table(TBL_BASE, 6, "P13b");
-    $display("P13 done (%0d checks, %0d errs)", checks, errs);
+
+    // P6: Disable channel 1 and include an invalid channel 13 record.
+    if (tj_run_case("P6")) begin
+      clr_expect();
+      apb_wr(A_LNK_EN, 32'h005);  sh_en = 12'h005;
+      recs.delete();
+      for (int i = 0; i < 30; i++)
+        recs.push_back(mk_rec(16'(i), 8'h0, 8'($urandom_range(0, 2)), rnd_pkt()));
+      recs.push_back(mk_rec(16'h666, 8'h0, 8'd13, rnd_pkt()));      // Invalid channel.
+      recs.push_back(mk_rec(16'h667, REC_LAST, 8'd0, rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      run_table(TBL_BASE, recs.size(), "P6");
+      chk(exp_err, "P6: 金标准自检(应有 ERR)");
+      apb_wr(A_LNK_EN, 32'h007);  sh_en = 12'h007;
+      $display("P6 done (%0d checks, %0d errs)", checks, errs);
+    end
+
+    // P7: Swap channel 0 and channel 2 mappings.
+    if (tj_run_case("P7")) begin
+      clr_expect();
+      apb_wr(A_REMAP0, 32'h7654_3012);  sh_remap = 48'hBA98_7654_3012;
+      recs.delete();
+      for (int i = 0; i < 24; i++)
+        recs.push_back(mk_rec(16'(i), (i == 23) ? REC_LAST : 8'h0,
+                              8'($urandom_range(0, 2)), rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      run_table(TBL_BASE, 24, "P7");
+      apb_wr(A_REMAP0, 32'h7654_3210);  sh_remap = 48'hBA98_7654_3210;
+      $display("P7 done (%0d checks, %0d errs)", checks, errs);
+    end
+
+    // P8: Abort on an AXI read error, then start another task.
+    if (tj_run_case("P8")) begin
+      clr_expect();
+      recs.delete();
+      for (int i = 0; i < 10; i++)
+        recs.push_back(mk_rec(16'(i), 8'h0, 8'd0, rnd_pkt()));
+      // No packets expected from failed reads.
+      foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
+      exp_err = 1;                                                  // Expect the AXI read error.
+      run_table(ERR_BASE, 10, "P8a");
+      chk(exp_sent == 0, "P8a: 金标准自检(0 发送)");
+      // Check that a new task can report an error after an AXI failure.
+      clr_expect();
+      recs.delete();
+      for (int i = 0; i < 4; i++)
+        recs.push_back(mk_rec(16'(i), 8'h0, 8'($urandom_range(0, 2)), rnd_pkt()));
+      // Invalid channel must report an error.
+      recs.push_back(mk_rec(16'h666, 8'h0, 8'd13, rnd_pkt()));
+      for (int i = 0; i < 3; i++)
+        recs.push_back(mk_rec(16'(4 + i), (i == 2) ? REC_LAST : 8'h0,
+                              8'($urandom_range(0, 2)), rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      run_table(TBL_BASE, recs.size(), "P8b");
+      chk(exp_err, "P8b: 金标准自检(应有 ERR)");
+      $display("P8 done (%0d checks, %0d errs)", checks, errs);
+    end
+
+    // P9: Abort with pending packets, drain each port, then restart.
+    if (tj_run_case("P9")) begin
+      clr_expect();
+      port_block = 4'hF;
+      apb_wr(A_STA, 32'h300);
+      apb_wr(A_IRQ_RAW, 32'h200);
+      recs.delete();
+      // The first three records occupy ports 0..2; only the third requests IRQ.
+      for (int i = 0; i < 50; i++) begin
+        recs.push_back(mk_rec(16'(i), (i == 2) ? REC_IRQ : 8'h00,
+                              8'(i % 3), rnd_pkt()));
+        ddr[(TBL_BASE >> 4) + i] = recs[i];
+        if (i < 3) gold_rec(recs[i]);
+      end
+      start_table(TBL_BASE, 50);
+      for (int t = 0; t < 2000; t++) begin
+        @(negedge maxi_clk);
+        if (lv_tx_tvalid === 4'h7) break;
+      end
+      chk(lv_tx_tvalid === 4'h7, "P9: packets pending on all three ports");
+      p9_pending = 4'h7;
+      p9_hold_ok = 1;
+      p9_no_refill = 1;
+      p9_watch = 1;
+      wait_sent(0, "P9 blocked");
+      apb_rd(A_STA, v); chk(v[0] && !v[8] && !v[9], "P9: busy before abort");
+      apb_rd(A_IRQ_RAW, v); chk(!v[9], "P9: no IRQ before packet acceptance");
+      apb_wr(A_GLB_CTRL, 32'h1);
+
+      // Allow the abort to cross clock domains while all outputs remain blocked.
+      repeat (12) @(negedge maxi_clk);
+      repeat (12) @(negedge pclk);
+      apb_rd(A_STA, v);
+      chk(v[0] && !v[8] && !v[9], "P9: abort retains BUSY without DONE or ERR");
+      for (int p = 0; p < NP; p++)
+        chk(got_d[p].size() == 0, $sformatf("P9: port %0d still blocked", p));
+
+      // Drain the IRQ-marked packet last; earlier packets must not raise IRQ.
+      for (int p = 0; p < 3; p++) begin
+        @(negedge maxi_clk); port_block[p] = 0;
+        for (int t = 0; t < 2000; t++) begin
+          @(negedge maxi_clk);
+          if (got_d[p].size() != 0) break;
+        end
+        chk(got_d[p].size() == 1, $sformatf("P9: port %0d drains one packet", p));
+        wait_sent(p + 1, "P9 drain");
+        if (p < 2) begin
+          apb_rd(A_STA, v);
+          chk(v[0] && !v[8] && !v[9], "P9: BUSY until all pending packets drain");
+          apb_rd(A_IRQ_RAW, v); chk(!v[9], "P9: unmarked packets do not raise IRQ");
+        end
+      end
+      for (int t = 0; t < apb_poll_limit(2000); t++) begin
+        apb_rd(A_STA, v);
+        if (!v[0]) break;
+      end
+      chk(!v[0] && !v[8] && !v[9], "P9: idle after draining, no DONE or ERR");
+      apb_rd(A_IRQ_RAW, v); chk(v[9], "P9: IRQ-marked packet reports during abort drain");
+      repeat (16) @(negedge maxi_clk);
+      chk(p9_pending === '0, "P9: every pending packet accepted");
+      chk(p9_hold_ok, "P9: pending VALID and payload held until acceptance");
+      chk(p9_no_refill, "P9: no new packets after abort");
+      check_ports("P9a");
+      p9_watch = 0;
+      port_block = '0;
+      apb_wr(A_IRQ_RAW, 32'h200);
+      clr_expect();
+      recs.delete();
+      for (int i = 0; i < 8; i++)
+        recs.push_back(mk_rec(16'(i), (i == 7) ? REC_LAST : 8'h0,
+                              8'($urandom_range(0, 2)), rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      run_table(TBL_BASE, 8, "P9b");
+      $display("P9 done (%0d checks, %0d errs)", checks, errs);
+    end
+
+    // P10: Boundary split: 4 + 64 + 64 + 9 records, followed by an empty job.
+    if (tj_run_case("P10")) begin
+      clr_expect(); apb_wr(A_LNK_EN, 7); recs.delete();
+      for (int i=0; i<141; i++) recs.push_back(mk_rec(16'(i), 0, 8'(i%3), rnd_pkt()));
+      load_table(48'h10000FC0, recs);
+      watch_boundary = 1; boundary_requests = 0; max_outstanding = 0;
+      run_table(48'h10000FC0, 141, "BOUNDARY");
+      watch_boundary = 0;
+      chk(boundary_requests == 4 && max_outstanding > 1, "boundary split and multiple outstanding exercised");
+      ar0 = total_ar;
+      clr_expect(); run_table(TBL_BASE, 0, "EMPTY");
+      chk(total_ar == ar0, "EMPTY: no memory request");
+    end
+
+    // P11: Retain a stalled AR after abort, then drain the accepted burst.
+    if (tj_run_case("P11")) begin
+      clr_expect(); apb_wr(A_IRQ_RAW, 32'hFFFFFFFF);
+      for (int i=0; i<128; i++) ddr[(TBL_BASE>>4)+i] = mk_rec(16'(i),0,0,rnd_pkt());
+      ar0 = total_ar; r0 = total_r; force_ar_block = 1;
+      start_table(TBL_BASE, 128);
+      for (int i=0; i<2000; i++) begin @(negedge maxi_clk); if (arvalid) break; end
+      chk(arvalid && !arready, "ABORT_AR: pending request exists");
+      repeat (8) @(negedge maxi_clk);
+      apb_wr(A_GLB_CTRL,1);
+      repeat (12) @(negedge maxi_clk);
+      repeat (12) @(negedge pclk);
+      chk(arvalid && !arready && total_ar==ar0, "ABORT_AR: stalled request retained after abort");
+      apb_rd(A_STA,v); chk(v[0] && !v[8] && !v[9], "ABORT_AR: remains busy without completion");
+      force_ar_block = 0;
+      for (int i=0; i<apb_poll_limit(2000); i++) begin apb_rd(A_STA,v); if (!v[0]) break; end
+      chk(!v[0] && !v[8] && !v[9], "ABORT_AR: returns idle after draining");
+      chk(total_ar==ar0+1 && total_r==r0+64 && outstanding==0, "ABORT_AR: drains exactly the committed burst");
+      for (int p=0; p<NP; p++) chk(got_d[p].size()==0, "ABORT_AR: no packets transmitted");
+    end
+
+    // P12: LAST in the first burst; drain all later outstanding reads.
+    if (tj_run_case("P12")) begin
+      clr_expect(); recs.delete();
+      for (int i=0; i<300; i++) recs.push_back(mk_rec(16'(i), (i==4)?REC_LAST:8'h00, 8'(i%3),rnd_pkt()));
+      load_table(TBL_BASE,recs); run_table(TBL_BASE,300,"EARLY_LAST_MULTIBURST");
+      chk(exp_sent==5 && outstanding==0,"EARLY_LAST_MULTIBURST: five outputs and all reads drained");
+      $display("P10-P12 done (%0d checks, %0d errs)", checks, errs);
+    end
+
+    // P13: Consecutive error and IRQ tasks, polling phases and recovery.
+    if (tj_run_case("P13")) begin
+      // Each fast AXI failure must raise a new error event.
+      ddr_fast = 1'b1;
+      for (int k = 0; k < 3; k++) begin
+        clr_expect();
+        apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+        recs.delete();
+        recs.push_back(mk_rec(16'(k), REC_LAST, 8'd0, rnd_pkt()));
+        foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
+        exp_err = 1;
+        run_table(ERR_BASE, 1, $sformatf("P13.%0d", k));
+        apb_rd(A_IRQ_RAW, v);
+        chk(v[28], $sformatf("P13.%0d: each AXI error task sets RAW[28]", k));
+      end
+      // Invalid records report errors while valid records continue.
+      for (int k = 0; k < 2; k++) begin
+        clr_expect();
+        recs.delete();
+        recs.push_back(mk_rec(16'h666, 8'h0, 8'd13, rnd_pkt()));
+        recs.push_back(mk_rec(16'h667, REC_LAST, 8'd0, rnd_pkt()));
+        load_table(TBL_BASE, recs);
+        run_table(TBL_BASE, recs.size(), $sformatf("P13r.%0d", k));
+        chk(exp_err, "P13r: test input must require ERR");
+      end
+      // Check ERR in the first DONE read at all four APB polling phases.
+      for (int k = 0; k < 8; k++) begin
+        clr_expect();
+        apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+        poll_skew = k % 4;
+        recs.delete();
+        if (k < 4) begin
+          recs.push_back(mk_rec(16'(k), REC_LAST, 8'd0, rnd_pkt()));
+          foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
+          exp_err = 1;
+          run_table(ERR_BASE, 1, $sformatf("P13s.%0d(AXI error, phase %0d)", k, poll_skew));
+          apb_rd(A_IRQ_RAW, v);
+          chk(v[28], $sformatf("P13s.%0d: RAW[28]", k));
+        end else begin
+          recs.push_back(mk_rec(16'h666, 8'h0, 8'd13, rnd_pkt()));
+          recs.push_back(mk_rec(16'h667, REC_LAST, 8'd0, rnd_pkt()));
+          load_table(TBL_BASE, recs);
+          run_table(TBL_BASE, recs.size(), $sformatf("P13s.%0d(invalid record, phase %0d)", k, poll_skew));
+          chk(exp_err, "P13s: test input must require ERR");
+        end
+      end
+      // A successful task must not inherit a previous task's error.
+      poll_skew = 0;
+      clr_expect();
+      recs.delete();
+      recs.push_back(mk_rec(16'h0, REC_LAST, 8'd0, rnd_pkt()));
+      foreach (recs[i]) ddr[(ERR_BASE >> 4) + i] = recs[i];
+      exp_err = 1;
+      run_table(ERR_BASE, 1, "P13c.0(AXI error)");
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      clr_expect();
+      recs.delete();
+      for (int i = 0; i < 6; i++)
+        recs.push_back(mk_rec(16'(i), (i == 5) ? REC_LAST : 8'h0,
+                              8'($urandom_range(0, 2)), rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      run_table(TBL_BASE, 6, "P13c.1(valid table)");
+      repeat (16) @(posedge pclk);
+      apb_rd(A_STA, v);
+      chk(!v[9], "P13c: ERR remains clear after a valid task");
+      apb_rd(A_IRQ_RAW, v);
+      chk(!v[28], "P13c: valid task keeps RAW[28] clear");
+      // Each task must report its record IRQ before completion.
+      for (int k = 0; k < 2; k++) begin
+        clr_expect();
+        apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+        recs.delete();
+        for (int i = 0; i < 400; i++)
+          recs.push_back(mk_rec(16'(i), (i == 0) ? REC_IRQ
+                                      : (i == 399) ? REC_LAST : 8'h0,
+                                8'($urandom_range(0, 2)), rnd_pkt()));
+        load_table(TBL_BASE, recs);
+        apb_wr(A_SRC_LO, TBL_BASE[31:0]); apb_wr(A_SRC_HI, {16'h0, TBL_BASE[47:32]});
+        apb_wr(A_CNT, 400); apb_wr(A_DB, 32'h1);
+        v2 = 0;
+        for (int t = 0; t < 5000; t++) begin
+          apb_rd(A_IRQ_RAW, v);
+          if (v[9]) begin apb_rd(A_GLB_STA, v2); break; end
+        end
+        chk(v[9], $sformatf("P13i.%0d: IRQ-marked record sets RAW[9]", k));
+        chk(v2[9], $sformatf("P13i.%0d: SEND is still busy when the record IRQ arrives", k));
+        v = 0;
+        for (int t = 0; t < apb_poll_limit(20000); t++) begin
+          apb_rd(A_STA, v);
+          if (v[8]) break;
+        end
+        chk(v[8], $sformatf("P13i.%0d: DONE timeout", k));
+        apb_wr(A_STA, 32'h300);
+        check_ports($sformatf("P13i.%0d", k));
+      end
+      // Restore random DDR stalls and check normal task completion.
+      ddr_fast = 1'b0;
+      clr_expect();
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      recs.delete();
+      for (int i = 0; i < 6; i++)
+        recs.push_back(mk_rec(16'(i), (i == 5) ? REC_LAST : 8'h0,
+                              8'($urandom_range(0, 2)), rnd_pkt()));
+      load_table(TBL_BASE, recs);
+      run_table(TBL_BASE, 6, "P13b");
+      $display("P13 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     if (errs == 0 && checks > 0) $display("SEND TB PASS (%0d checks)", checks);
     else           $display("SEND TB FAIL (%0d/%0d)", errs, checks);

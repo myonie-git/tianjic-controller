@@ -6,6 +6,7 @@
 module tb_tj_cfgchain;
   timeunit 1ns;
   timeprecision 1ps;
+  `include "tj_case_select.svh"
   import tj_ctrl_csr_pkg::*;
   real hp = 5.0;
   initial if (!$value$plusargs("TJ_PCLK_HP=%f", hp)) hp = 5.0;
@@ -175,60 +176,79 @@ module tb_tj_cfgchain;
   initial begin
     logic [31:0] status, value;
     int start_count;
+    tj_cases_init("P1,P2,P3,P4");
+    if (tj_case_filter_active && !tj_case_wanted("P1")) reset_all();
     // P1: CSR readback, instance selection, KIND 2/3 and both polling phases.
-    reset_all();
-    cc_write(0, 4, 32'ha1234567);
-    cc_write(1, 4, 32'hb7654321);
-    for (int phase = 0; phase < 2; phase++) begin
-      cc_read(0, 2, phase, 4, 32'ha1234567);
-      cc_read(1, 2, phase, 4, 32'hb7654321);
-      cc_read(0, 3, phase, 4, 32'ha1234567);
+    if (tj_run_case("P1")) begin
+      reset_all();
+      cc_write(0, 4, 32'ha1234567);
+      cc_write(1, 4, 32'hb7654321);
+      for (int phase = 0; phase < 2; phase++) begin
+        cc_read(0, 2, phase, 4, 32'ha1234567);
+        cc_read(1, 2, phase, 4, 32'hb7654321);
+        cc_read(0, 3, phase, 4, 32'ha1234567);
+      end
+      wr(16'h3810, 32'h100);
     end
-    wr(16'h3810, 32'h100);
-    // P2: A missing target times out; subsequent accesses still complete.
-    issue(2, 3, 4);
-    poll(1, 1, status);
-    cc_write(0, 8, 32'hc001abcd);
-    cc_read(0, 2, 0, 8, 32'hc001abcd);
 
-    wr(16'h3810, 32'h100);
+    // P2: A missing target times out; subsequent accesses still complete.
+    if (tj_run_case("P2")) begin
+      issue(2, 3, 4);
+      poll(1, 1, status);
+      cc_write(0, 8, 32'hc001abcd);
+      cc_read(0, 2, 0, 8, 32'hc001abcd);
+
+      wr(16'h3810, 32'h100);
+    end
+
     // P3: GO while busy must not replace or queue a command.
-    idle();
-    target_hold = 1;
-    start_count = command_count;
-    issue(2, 0, 4);
-    xfer(0, 16'h3810, 0, status);
-    chk(status[0], "Target hold keeps reader busy");
-    issue(1, 0, 32'hbadbad00);
-    idle();
-    target_hold = 0;
-    poll(1, 0, status);
-    xfer(0, 16'h3808, 0, value);
-    chk(value == 32'ha1234567, "Busy GO leaves the current read unchanged");
-    chk(command_count == start_count+1, "Busy GO was not sent to the chain");
-    idle();
+    if (tj_run_case("P3")) begin
+      if (tj_case_filter_active) begin
+        // Finish the seed write before holding the target response.
+        cc_write(0, 4, 32'ha1234567);
+        cc_read(0, 2, 0, 4, 32'ha1234567);
+        wr(16'h3810, 32'h100);
+      end
+      idle();
+      target_hold = 1;
+      start_count = command_count;
+      issue(2, 0, 4);
+      xfer(0, 16'h3810, 0, status);
+      chk(status[0], "Target hold keeps reader busy");
+      issue(1, 0, 32'hbadbad00);
+      idle();
+      target_hold = 0;
+      poll(1, 0, status);
+      xfer(0, 16'h3808, 0, value);
+      chk(value == 32'ha1234567, "Busy GO leaves the current read unchanged");
+      chk(command_count == start_count+1, "Busy GO was not sent to the chain");
+      idle();
+    end
 
     // P4: Submit on the first idle cycle and verify both targets through readback.
-    raw_mode = 1;
-    for (int target = 0; target < 2; target++) begin
-      int start_dvld;
-      reset_all();
-      start_dvld = dvld_count;
-      raw_beat(2'(target), 0, 4);
-      raw_beat(2'(target), 1, 32'h12345678);
-      raw_beat(2'(target), 0, 8);
-      raw_beat(2'(target), 1, 32'h89abcdef);
-      repeat (16) @(negedge clk);
-      chk(writes[target] == 2, "Idle-paced writes must both reach the target");
-      chk(writes[1-target] == 0, "Other target remains unchanged");
-      chk(memory[target][1] == 32'h12345678, "First idle-paced write value");
-      chk(memory[target][2] == 32'h89abcdef, "Second idle-paced write value");
-      chk(dvld_count == start_dvld, "Writes do not report read data valid");
-      raw_beat(2'(target), 2, 4);
-      while (busy) @(negedge clk);
-      chk(rdata == 32'h12345678, "Readback after idle-paced writes");
-      chk(dvld_count == start_dvld+1, "One read result event");
+    if (tj_run_case("P4")) begin
+      raw_mode = 1;
+      for (int target = 0; target < 2; target++) begin
+        int start_dvld;
+        reset_all();
+        start_dvld = dvld_count;
+        raw_beat(2'(target), 0, 4);
+        raw_beat(2'(target), 1, 32'h12345678);
+        raw_beat(2'(target), 0, 8);
+        raw_beat(2'(target), 1, 32'h89abcdef);
+        repeat (16) @(negedge clk);
+        chk(writes[target] == 2, "Idle-paced writes must both reach the target");
+        chk(writes[1-target] == 0, "Other target remains unchanged");
+        chk(memory[target][1] == 32'h12345678, "First idle-paced write value");
+        chk(memory[target][2] == 32'h89abcdef, "Second idle-paced write value");
+        chk(dvld_count == start_dvld, "Writes do not report read data valid");
+        raw_beat(2'(target), 2, 4);
+        while (busy) @(negedge clk);
+        chk(rdata == 32'h12345678, "Readback after idle-paced writes");
+        chk(dvld_count == start_dvld+1, "One read result event");
+      end
     end
+
     if (checks > 0 && errs == 0) $display("CFGCHAIN TB PASS (%0d checks)", checks);
     else $display("CFGCHAIN TB FAIL (%0d/%0d)", errs, checks);
     $finish;

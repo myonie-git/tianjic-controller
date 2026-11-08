@@ -68,7 +68,7 @@ class Regression:
     def build(self, name, top, files, width=None):
         work = self.output / name
         work.mkdir()
-        for path in files:
+        for path in files + [self.controller / "tb/common/tj_case_select.svh"]:
             relative = str(path.relative_to(self.controller))
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             if relative in self.inputs and self.inputs[relative] != digest:
@@ -77,7 +77,8 @@ class Regression:
         write_json(self.output / "inputs.json", self.inputs)
         options = ["+define+TEST_DW=" + str(width)] if width is not None else []
         self.step(name + "_compile", ["vlogan", "-full64", "-sverilog", "-nc",
-                  "-timescale=1ns/1ps"] + options + files, work)
+                  "-timescale=1ns/1ps", "+incdir+" + str(self.controller / "tb/common")] +
+                  options + files, work)
         rejection = "tj_axi_rd_backend requires AXI_DW=128" if width in (256, 512) else None
         self.step(name + "_elaborate", ["vcs", "-full64", "-nc", top, "-o", "simv"],
                   work, rejection=rejection)
@@ -103,9 +104,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", type=Path, help="New or empty build/log directory")
     parser.add_argument("--tests", nargs="+", choices=TESTS, default=list(TESTS))
+    parser.add_argument("--cases", help="Comma-separated system scenes, e.g. P1,P13")
     parser.add_argument("--model", choices=("both", "plain", "jitter"), default="both")
     parser.add_argument("--seeds", nargs="+", type=int, default=[1, 2, 3, 4])
     args = parser.parse_args()
+    if args.cases and "system" not in args.tests:
+        parser.error("--cases requires the system test in --tests.")
     controller = Path(__file__).resolve().parents[2]
     output = args.out_dir.resolve() if args.out_dir else Path(tempfile.mkdtemp(prefix="tj_send_"))
     if output.exists() and any(output.iterdir()):
@@ -156,6 +160,8 @@ def main():
                                    "+TJ_MAXI_HP=" + str(maxi_hp), "+ntb_random_seed=" + str(seed)]
                         if test == "system":
                             command.append("+IMG=" + str(image))
+                            if args.cases:
+                                command.append("+TJ_CASES=" + args.cases)
                         run.step("{}_{}_{}".format(name, ratio, seed), command, work,
                                  pass_prefix=prefix)
         run.verify_inputs()

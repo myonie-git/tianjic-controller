@@ -3,6 +3,7 @@
 // Description : Exercise BOOT through APB and compare die 0 AHB writes with the DDR image.
 `timescale 1ns/1ps
 module tb_tj_boot;
+  `include "tj_case_select.svh"
   function automatic real half_period(input string key, input real fallback);
     real value;
     if (!$value$plusargs({key, "=%f"}, value)) value = fallback;
@@ -323,6 +324,7 @@ module tb_tj_boot;
 
   initial begin
     int spi_div;
+    tj_cases_init("P1,P2,P3,P4,P5,P6,P7,P8,P9,P10,P11");
     psel = 0; penable = 0; pwrite = 0; paddr = '0; pwdata = '0;
     #200ns;
     @(negedge pclk);
@@ -336,175 +338,197 @@ module tb_tj_boot;
     wr_log.delete();
 
     // ---------- P1 BOOT_PRIM 2 行(64B) ----------
-    prep_prim(SRC0, 16, 32'h0200_0000);
-    boot_run(2'd1, SRC0, 32'd64, 32'h0200_0000, 4'd0, "P1");
-    check_log("P1");
-    apb_rd(A_IRQ_RAW, v);
-    chk(v[8] && !v[29], "P1: RAW[8] 完成且 [29] 无错");
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    $display("P1 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P1")) begin
+      prep_prim(SRC0, 16, 32'h0200_0000);
+      boot_run(2'd1, SRC0, 32'd64, 32'h0200_0000, 4'd0, "P1");
+      check_log("P1");
+      apb_rd(A_IRQ_RAW, v);
+      chk(v[8] && !v[29], "P1: RAW[8] 完成且 [29] 无错");
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      $display("P1 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // ---------- P2 BOOT_PRIM 3 行(96B,跨 64B 块界重取数) ----------
-    prep_prim(SRC0 + 64'h1000, 24, 32'h0200_0040);
-    boot_run(2'd1, SRC0 + 64'h1000, 32'd96, 32'h0200_0040, 4'd0, "P2");
-    check_log("P2");
-    $display("P2 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P2")) begin
+      prep_prim(SRC0 + 64'h1000, 24, 32'h0200_0040);
+      boot_run(2'd1, SRC0 + 64'h1000, 32'd96, 32'h0200_0040, 4'd0, "P2");
+      check_log("P2");
+      $display("P2 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // ---------- P3 FW_LOAD 256B(4×WR16) ----------
-    prep_fw(SRC0 + 64'h2000, 64, 32'h0100_0000);
-    boot_run(2'd0, SRC0 + 64'h2000, 32'd256, 32'h0100_0000, 4'd0, "P3");
-    check_log("P3");
-    $display("P3 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P3")) begin
+      prep_fw(SRC0 + 64'h2000, 64, 32'h0100_0000);
+      boot_run(2'd0, SRC0 + 64'h2000, 32'd256, 32'h0100_0000, 4'd0, "P3");
+      check_log("P3");
+      $display("P3 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // ---------- P4 长度非法 ----------
-    boot_run(2'd1, SRC0, 32'd0,   32'h0200_0000, 4'd3, "P4a(len=0)");
-    boot_run(2'd1, SRC0, 32'd160, 32'h0200_0000, 4'd3, "P4b(prim>128)");
-    boot_run(2'd0, SRC0, 32'd96,  32'h0100_0000, 4'd3, "P4c(fw 非64倍数)");
-    chk(wr_log.size() == 0, "P4: 非法长度不产生任何 SPI 写");
-    exp_q.delete();
-    $display("P4 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P4")) begin
+      boot_run(2'd1, SRC0, 32'd0,   32'h0200_0000, 4'd3, "P4a(len=0)");
+      boot_run(2'd1, SRC0, 32'd160, 32'h0200_0000, 4'd3, "P4b(prim>128)");
+      boot_run(2'd0, SRC0, 32'd96,  32'h0100_0000, 4'd3, "P4c(fw 非64倍数)");
+      chk(wr_log.size() == 0, "P4: 非法长度不产生任何 SPI 写");
+      exp_q.delete();
+      $display("P4 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P5: A failed DDR read reports its own IRQ and closes CLK_SHIFT.
-    apb_wr(A_IRQ_RAW, 32'h2000_0000);
-    apb_rd(A_IRQ_RAW, v);
-    chk(v[29] === 1'b0, "P5: BOOT error IRQ must start clear");
-    boot_run(2'd1, 64'h100_0000_0000, 32'd64, 32'h0200_0000, 4'd2, "P5");
-    exp_wr(32'h0208000C, 32'h1);
-    exp_wr(32'h0208000C, 32'h0);                    // 仅开/关两笔,数据零笔
-    check_log("P5");
-    apb_rd(A_IRQ_RAW, v);
-    chk(v[29] === 1'b1, "P5: DDR error must set the BOOT error IRQ");
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    $display("P5 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P5")) begin
+      apb_wr(A_IRQ_RAW, 32'h2000_0000);
+      apb_rd(A_IRQ_RAW, v);
+      chk(v[29] === 1'b0, "P5: BOOT error IRQ must start clear");
+      boot_run(2'd1, 64'h100_0000_0000, 32'd64, 32'h0200_0000, 4'd2, "P5");
+      exp_wr(32'h0208000C, 32'h1);
+      exp_wr(32'h0208000C, 32'h0);                    // 仅开/关两笔,数据零笔
+      check_log("P5");
+      apb_rd(A_IRQ_RAW, v);
+      chk(v[29] === 1'b1, "P5: DDR error must set the BOOT error IRQ");
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      $display("P5 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P6: Timeout during the first CLK_SHIFT write. Check status at both APB polling phases.
-    apb_wr(A_SPI_TMO, 32'd50);
-    for (int phase = 0; phase < 2; phase++)
-      boot_run(2'd1, SRC0, 32'd64, 32'h0200_0000, 4'd1, "P6", phase);
-    apb_wr(A_SPI_TMO, 32'h000F_4240);
-    repeat (400) @(posedge pclk);
-    wr_log.delete();
-    $display("P6 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P6")) begin
+      apb_wr(A_SPI_TMO, 32'd50);
+      for (int phase = 0; phase < 2; phase++)
+        boot_run(2'd1, SRC0, 32'd64, 32'h0200_0000, 4'd1, "P6", phase);
+      apb_wr(A_SPI_TMO, 32'h000F_4240);
+      repeat (400) @(posedge pclk);
+      wr_log.delete();
+      $display("P6 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P7: Abort within the first data frame. That word must finish before CLK_SHIFT closes.
-    prep_prim(SRC0 + 64'h4000, 32, 32'h0200_0000);
-    exp_q = exp_q[0:1];  // Keep CLK_SHIFT=1 and the first data word.
-    exp_wr(32'h0208_000C, 0);
-    start_boot(2'd1, SRC0 + 64'h4000, 32'd128, 32'h0200_0000);
-    wait (cs_w[0] === 1'b0);
-    @(posedge cs_w[0]);
-    @(negedge cs_w[0]);
-    apb_wr(A_GLB_CTRL, 1);
-    check_abort_idle("P7");
-    check_log("P7");
-    prep_prim(SRC0 + 64'h5000, 16, 32'h0200_0000);
-    boot_run(2'd1, SRC0 + 64'h5000, 32'd64, 32'h0200_0000, 4'd0, "P7b");
-    check_log("P7b");
-    $display("P7 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P7")) begin
+      prep_prim(SRC0 + 64'h4000, 32, 32'h0200_0000);
+      exp_q = exp_q[0:1];  // Keep CLK_SHIFT=1 and the first data word.
+      exp_wr(32'h0208_000C, 0);
+      start_boot(2'd1, SRC0 + 64'h4000, 32'd128, 32'h0200_0000);
+      wait (cs_w[0] === 1'b0);
+      @(posedge cs_w[0]);
+      @(negedge cs_w[0]);
+      apb_wr(A_GLB_CTRL, 1);
+      check_abort_idle("P7");
+      check_log("P7");
+      prep_prim(SRC0 + 64'h5000, 16, 32'h0200_0000);
+      boot_run(2'd1, SRC0 + 64'h5000, 32'd64, 32'h0200_0000, 4'd0, "P7b");
+      check_log("P7b");
+      $display("P7 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P8: Issue the SPIWIN read while the first firmware frame owns the SPI group.
-    mem[(32'h0100_2000 & 32'h3_FFFF) >> 2] = 32'hA5A5_5A5A;  // 预置芯片侧读值(模型按 [17:2] 索引)
-    apb_wr(A_WIN_EN, 32'h1);
-    apb_wr(A_WIN_PAGE, 32'h0);
-    apb_wr(A_WIN_OFFS, 32'h0000_1002);              // 页=0x01002xxx
-    prep_fw(SRC0 + 64'h6000, 64, 32'h0100_4000);
-    start_boot(2'd0, SRC0 + 64'h6000, 32'd256, 32'h0100_4000);
-    wait (cs_w[0] === 1'b0);
-    fork
-      begin
-        apb_rd(16'h4000, v);
-        chk(v === 32'hA5A5_5A5A, $sformatf("P8: SPIWIN read = %08x", v));
-      end
-      begin
-        do @(posedge chip_hclk); while (!(ap_v && !ap_w));
-        chk(ap_a === 32'h0100_2000, "P8: wrong AHB read address");
-        chk(wr_log.size() > 0 && wr_log.size() < 64 && wr_log.size() % 16 == 0,
-            "P8: SPIWIN must read between firmware bursts");
-      end
-    join
-    check_completion(4'd0, "P8");
-    check_log("P8");
-    $display("P8 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P8")) begin
+      mem[(32'h0100_2000 & 32'h3_FFFF) >> 2] = 32'hA5A5_5A5A;  // 预置芯片侧读值(模型按 [17:2] 索引)
+      apb_wr(A_WIN_EN, 32'h1);
+      apb_wr(A_WIN_PAGE, 32'h0);
+      apb_wr(A_WIN_OFFS, 32'h0000_1002);              // 页=0x01002xxx
+      prep_fw(SRC0 + 64'h6000, 64, 32'h0100_4000);
+      start_boot(2'd0, SRC0 + 64'h6000, 32'd256, 32'h0100_4000);
+      wait (cs_w[0] === 1'b0);
+      fork
+        begin
+          apb_rd(16'h4000, v);
+          chk(v === 32'hA5A5_5A5A, $sformatf("P8: SPIWIN read = %08x", v));
+        end
+        begin
+          do @(posedge chip_hclk); while (!(ap_v && !ap_w));
+          chk(ap_a === 32'h0100_2000, "P8: wrong AHB read address");
+          chk(wr_log.size() > 0 && wr_log.size() < 64 && wr_log.size() % 16 == 0,
+              "P8: SPIWIN must read between firmware bursts");
+        end
+      join
+      check_completion(4'd0, "P8");
+      check_log("P8");
+      $display("P8 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P9: Compare the same held read with and without SRST.
-    held_read(0, 0, "P9 firmware control");
-    held_read(0, 1, "P9 firmware abort");
-    held_read(1, 1, "P9 primitive abort");
+    if (tj_run_case("P9")) begin
+      held_read(0, 0, "P9 firmware control");
+      held_read(0, 1, "P9 firmware abort");
+      held_read(1, 1, "P9 primitive abort");
+    end
 
     // P10: Misaligned, out-of-range and last legal destinations.
-    boot_run(2'd0, SRC0, 64,  32'h0100_0020, 3, "P10 firmware alignment");
-    boot_run(2'd0, SRC0, 128, 32'hFFFF_FFC0, 3, "P10 firmware wrap");
-    boot_run(2'd1, SRC0, 32,  32'h0200_0010, 3, "P10 primitive alignment");
-    boot_run(2'd1, SRC0, 32,  32'h01FF_FFE0, 3, "P10 below core memory");
-    boot_run(2'd1, SRC0, 64,  32'h0207_FFE0, 3, "P10 beyond last row");
-    prep_prim(SRC0, 8, 32'h0207_FFE0);
-    boot_run(2'd1, SRC0, 32, 32'h0207_FFE0, 0, "P10 last row");
-    check_log("P10 last row");
-    for (int phase = 0; phase < 2; phase++) begin
-      prep_fw(SRC0, 16, 32'hFFFF_FFC0);
-      boot_run(2'd0, SRC0, 64, 32'hFFFF_FFC0, 0, "P10 last block", phase);
-      check_log("P10 last block");
+    if (tj_run_case("P10")) begin
+      boot_run(2'd0, SRC0, 64,  32'h0100_0020, 3, "P10 firmware alignment");
+      boot_run(2'd0, SRC0, 128, 32'hFFFF_FFC0, 3, "P10 firmware wrap");
+      boot_run(2'd1, SRC0, 32,  32'h0200_0010, 3, "P10 primitive alignment");
+      boot_run(2'd1, SRC0, 32,  32'h01FF_FFE0, 3, "P10 below core memory");
+      boot_run(2'd1, SRC0, 64,  32'h0207_FFE0, 3, "P10 beyond last row");
+      prep_prim(SRC0, 8, 32'h0207_FFE0);
+      boot_run(2'd1, SRC0, 32, 32'h0207_FFE0, 0, "P10 last row");
+      check_log("P10 last row");
+      for (int phase = 0; phase < 2; phase++) begin
+        prep_fw(SRC0, 16, 32'hFFFF_FFC0);
+        boot_run(2'd0, SRC0, 64, 32'hFFFF_FFC0, 0, "P10 last block", phase);
+        check_log("P10 last block");
+      end
     end
 
     // P11: Abort BOOT while a doorbell transaction holds the SPI group.
-    // Cases: firmware data, initial CLK_SHIFT write, and primitive data.
-    // Slow SPI keeps the doorbell active until SRST is issued.
-    apb_wr(A_SPI_DIV, 32'd15);
-    for (int k = 0; k < 3; k++) begin
-      automatic bit prim = (k != 0);
-      automatic longint unsigned src = SRC0 + 64'hB000 + 64'(k) * 64'h1000;
-      automatic logic [31:0] dbd = 32'h600D_0000 + 32'(k);
-      prep_words(src, 16, prim ? 32'h0200_0000 : 32'h0100_C000);
-      exp_q.delete();
-      repeat (400) @(posedge pclk);
-      wr_log.delete();
-      apb_wr(A_SPI_STA,  32'h0000_0300);
-      apb_wr(A_SPI_CMD,  32'h0);
-      apb_wr(A_SPI_ADDR, 32'h0100_F000);
-      apb_wr(A_SPI_WD,   dbd);
-      apb_wr(A_B_CMD,    {23'h0, 5'h0, 2'h0, prim ? 2'd1 : 2'd0});
-      apb_wr(A_B_SRCLO,  src[31:0]);
-      apb_wr(A_B_SRCHI,  {16'h0, src[47:32]});
-      apb_wr(A_B_LEN,    32'd64);
-      apb_wr(A_B_DST,    prim ? 32'h0200_0000 : 32'h0100_C000);
-      if (k == 2) begin
-        // Complete CLK_SHIFT=1, then let the doorbell block the BOOT data command.
-        apb_wr(A_B_DB,   32'h1);
-        apb_wr(A_SPI_DB, 32'h1);
-        repeat (3400) @(posedge pclk);
-      end else begin
-        // Start the doorbell first so the first BOOT command waits for the group.
-        apb_wr(A_SPI_DB, 32'h1);
-        apb_wr(A_B_DB,   32'h1);
-        repeat (800) @(posedge pclk);
+    if (tj_run_case("P11")) begin
+      // Cases: firmware data, initial CLK_SHIFT write, and primitive data.
+      // Slow SPI keeps the doorbell active until SRST is issued.
+      apb_wr(A_SPI_DIV, 32'd15);
+      for (int k = 0; k < 3; k++) begin
+        automatic bit prim = (k != 0);
+        automatic longint unsigned src = SRC0 + 64'hB000 + 64'(k) * 64'h1000;
+        automatic logic [31:0] dbd = 32'h600D_0000 + 32'(k);
+        prep_words(src, 16, prim ? 32'h0200_0000 : 32'h0100_C000);
+        exp_q.delete();
+        repeat (400) @(posedge pclk);
+        wr_log.delete();
+        apb_wr(A_SPI_STA,  32'h0000_0300);
+        apb_wr(A_SPI_CMD,  32'h0);
+        apb_wr(A_SPI_ADDR, 32'h0100_F000);
+        apb_wr(A_SPI_WD,   dbd);
+        apb_wr(A_B_CMD,    {23'h0, 5'h0, 2'h0, prim ? 2'd1 : 2'd0});
+        apb_wr(A_B_SRCLO,  src[31:0]);
+        apb_wr(A_B_SRCHI,  {16'h0, src[47:32]});
+        apb_wr(A_B_LEN,    32'd64);
+        apb_wr(A_B_DST,    prim ? 32'h0200_0000 : 32'h0100_C000);
+        if (k == 2) begin
+          // Complete CLK_SHIFT=1, then let the doorbell block the BOOT data command.
+          apb_wr(A_B_DB,   32'h1);
+          apb_wr(A_SPI_DB, 32'h1);
+          repeat (3400) @(posedge pclk);
+        end else begin
+          // Start the doorbell first so the first BOOT command waits for the group.
+          apb_wr(A_SPI_DB, 32'h1);
+          apb_wr(A_B_DB,   32'h1);
+          repeat (800) @(posedge pclk);
+        end
+        apb_rd(A_SPI_STA, v);
+        chk(v[0], $sformatf("P11.%0d: doorbell is busy before SRST", k));
+        apb_rd(A_B_STA, v);
+        chk(v[0], $sformatf("P11.%0d: BOOT is busy before SRST", k));
+        apb_wr(A_GLB_CTRL, 32'h1);
+        v = 32'h1;
+        for (int t = 0; t < 200000 * tscale && v[0]; t++) apb_rd(A_B_STA, v);
+        chk(!v[0], $sformatf("P11.%0d: BOOT becomes idle after SRST", k));
+        chk(!v[8], $sformatf("P11.%0d: SRST does not set BOOT DONE", k));
+        v = 0;
+        for (int t = 0; t < 200000 * tscale && !v[8]; t++) apb_rd(A_SPI_STA, v);
+        chk(v[8] && !v[9], $sformatf("P11.%0d: doorbell completes without a timeout", k));
+        // Allow any uncanceled command to reach the chip before checking the write log.
+        repeat (3000) @(posedge pclk);
+        if (k == 2) exp_wr(32'h0208000C, 32'h1);
+        exp_wr(32'h0100_F000, dbd);
+        if (k == 2) exp_wr(32'h0208000C, 32'h0);
+        check_log($sformatf("P11.%0d(%s)", k,
+                  k == 0 ? "FW: doorbell only" : k == 1 ? "PRIM clock-on: doorbell only" : "PRIM data: clock-on/doorbell/clock-off"));
       end
-      apb_rd(A_SPI_STA, v);
-      chk(v[0], $sformatf("P11.%0d: doorbell is busy before SRST", k));
-      apb_rd(A_B_STA, v);
-      chk(v[0], $sformatf("P11.%0d: BOOT is busy before SRST", k));
-      apb_wr(A_GLB_CTRL, 32'h1);
-      v = 32'h1;
-      for (int t = 0; t < 200000 * tscale && v[0]; t++) apb_rd(A_B_STA, v);
-      chk(!v[0], $sformatf("P11.%0d: BOOT becomes idle after SRST", k));
-      chk(!v[8], $sformatf("P11.%0d: SRST does not set BOOT DONE", k));
-      v = 0;
-      for (int t = 0; t < 200000 * tscale && !v[8]; t++) apb_rd(A_SPI_STA, v);
-      chk(v[8] && !v[9], $sformatf("P11.%0d: doorbell completes without a timeout", k));
-      // Allow any uncanceled command to reach the chip before checking the write log.
-      repeat (3000) @(posedge pclk);
-      if (k == 2) exp_wr(32'h0208000C, 32'h1);
-      exp_wr(32'h0100_F000, dbd);
-      if (k == 2) exp_wr(32'h0208000C, 32'h0);
-      check_log($sformatf("P11.%0d(%s)", k,
-                k == 0 ? "FW: doorbell only" : k == 1 ? "PRIM clock-on: doorbell only" : "PRIM data: clock-on/doorbell/clock-off"));
+      // Restore normal timing and check that a new BOOT task completes.
+      apb_wr(A_SPI_DIV, spi_div);
+      apb_wr(A_SPI_STA, 32'h0000_0300);
+      prep_prim(SRC0 + 64'hE000, 16, 32'h0200_0000);
+      boot_run(2'd1, SRC0 + 64'hE000, 32'd64, 32'h0200_0000, 4'd0, "P11b");
+      check_log("P11b");
+      $display("P11 done (%0d checks, %0d errs)", checks, errs);
     end
-    // Restore normal timing and check that a new BOOT task completes.
-    apb_wr(A_SPI_DIV, spi_div);
-    apb_wr(A_SPI_STA, 32'h0000_0300);
-    prep_prim(SRC0 + 64'hE000, 16, 32'h0200_0000);
-    boot_run(2'd1, SRC0 + 64'hE000, 32'd64, 32'h0200_0000, 4'd0, "P11b");
-    check_log("P11b");
-    $display("P11 done (%0d checks, %0d errs)", checks, errs);
 
     if (errs != 0 || checks == 0) $fatal(1, "BOOT TB FAIL (%0d/%0d)", errs, checks);
     $display("BOOT TB PASS (%0d checks)", checks);

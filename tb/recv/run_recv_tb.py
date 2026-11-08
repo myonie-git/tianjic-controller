@@ -13,6 +13,7 @@ def main():
     parser.add_argument('--top', type=Path)
     parser.add_argument('--testbench', type=Path, default=here / 'tb_tj_recv.sv')
     parser.add_argument('--work', type=Path, required=True)
+    parser.add_argument('--cases', help='Comma-separated comprehensive-test scenes, e.g. P10,P11')
     parser.add_argument('--jitter', action='store_true')
     parser.add_argument('--pclk-hp', type=float, default=5.0)
     parser.add_argument('--maxi-hp', type=float, default=1.2)
@@ -21,6 +22,8 @@ def main():
     root = args.rtl_root.resolve()
     top = (args.top or root / 'rtl/top/tj_ctrl_top.sv').resolve()
     tb = args.testbench.resolve()
+    if args.cases and tb.name != 'tb_tj_recv.sv':
+        parser.error('--cases applies to tb_tj_recv.sv; focused testbenches run as a whole.')
     if not top.is_file():
         parser.error('Controller top is unavailable; pass the test assembly with --top.')
     args.work = args.work.resolve()
@@ -52,7 +55,8 @@ def main():
         print(passed.group(0) if passed else name + ' PASS', flush=True)
         return True
 
-    if not step('compile', ['vlogan', '-full64', '-sverilog', '-nc', '-timescale=1ns/1ps'] +
+    if not step('compile', ['vlogan', '-full64', '-sverilog', '-nc', '-timescale=1ns/1ps',
+                            '+incdir+'+str(root / 'tb/common')] +
                 [root / f for f in rtl] + [top, tb]):
         return 1
     if not step('elaborate', ['vcs', '-full64', '-nc', tb.stem, '-o', 'simv']):
@@ -60,7 +64,7 @@ def main():
     ok = True
     for seed in args.seed or [1]:
         ok = step('seed' + str(seed), ['./simv', '-nc', '+ntb_random_seed=' + str(seed),
-                  '+TJ_PCLK_HP=' + str(args.pclk_hp), '+TJ_MAXI_HP=' + str(args.maxi_hp)],
+                  '+TJ_PCLK_HP=' + str(args.pclk_hp), '+TJ_MAXI_HP=' + str(args.maxi_hp)] + (['+TJ_CASES='+args.cases] if args.cases else []),
                   simulation=True) and ok
     return 0 if ok else 1
 

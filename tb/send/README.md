@@ -10,7 +10,7 @@ python3 controller/tb/send/run_send_tb.py --out-dir /tmp/send_regression
 
 | 选项 | 测试内容 |
 |---|---|
-| system | CSR→SEND→AXI读后端→LVDS公开端口；P1～P9及4 KiB切分、空表、挂起AR中止和LAST后排空 |
+| system | CSR→SEND→AXI读后端→LVDS公开端口；P1～P13，包括4 KiB切分、中止、连续错误与IRQ |
 | events | 连续错误表、恢复、忙时GO、配置后立即启动、启动中止及DONE/ERR/AXI事件逐笔计数 |
 | count | SENT在31→32、63→64、127→128、255→256边界的整字一致性和新任务清零 |
 | cdc | 复位后首事件、无事件、稳定后脉冲、事件合并及共同复位 |
@@ -32,6 +32,17 @@ python3 controller/tb/send/run_send_tb.py --out-dir /tmp/send_system \
   --tests system events --model jitter --seeds 1 31
 ```
 
+系统测例可通过--cases选择场景，未设置时保留P1～P13完整顺序：
+
+~~~sh
+python3 controller/tb/send/run_send_tb.py --tests system --cases P1,P13 \
+  --model plain --seeds 1 --out-dir /tmp/send_selected
+~~~
+
+--cases只作用于system，events等专项测试仍按--tests选择整组。
+直接运行simv时使用+TJ_CASES=P13；P2还需要+IMG。
+手动编译该TB时添加+incdir+<controller路径>/tb/common。
+
 抖动模型对同步器首级随机增加一拍采样延迟，不代表晶体管级亚稳态仿真。系统TB的实际时钟、等待和超时随参数变化；记录标志位LAST=0x01、FENCE=0x02、IRQ=0x04及三通道预期值独立于DUT常量。
 
 ## 系统测试装配
@@ -46,6 +57,7 @@ python3 controller/tb/send/run_send_tb.py --out-dir /tmp/send_system \
 | P10 | 4+64+64+9条的4 KiB切分、多笔在途及空表不发请求 |
 | P11 | 中止时保留挂起AR，接受后排空64拍响应且不发送包 |
 | P12 | 首突发第5条LAST，只输出5包并排空后续在途读数 |
+| P13 | 连续错误逐表上报、四种轮询相位、错误后恢复及连续记录IRQ |
 
 回归入口生成300条合成二进制记录用于P2，不依赖D1导出器或真实AI模型文件。需要自有镜像时可在构建完成后向系统仿真程序传入`+IMG=<path>`。
 

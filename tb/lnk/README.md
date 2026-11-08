@@ -35,3 +35,18 @@ YAWING_DESIGN=/path/to/soc/design DW_SIM_DIR=/path/to/dw/sim_ver \
 链路测例通过公开端口驱动和观察，不使用内部force或层次探针；每个方向的4个逻辑口各发40包，共320包。配置链测例连接真实Controller CSR、原生配置链接收逻辑和APB寄存器模型。
 
 配置链共用时钟，链路两端的数据时钟和位时钟独立。`+SLOW_ACLK`保留为单独运行仿真程序时的负向时钟诊断选项，不属于正常回归。这里的结果不替代FPGA PHY或板级验证。
+
+
+## 选择性运行
+
+不设置选择变量时，仍运行原有两种链路配置、全部种子及两个配置链时钟档。
+
+~~~sh
+LNK_TESTS=lnk LNK_CASES=T3 sh controller/tb/lnk/run_lnk_tb.sh /tmp/lnk_t3 1
+LNK_TESTS=cfgchain CFGCHAIN_CASES=P3 sh controller/tb/lnk/run_lnk_tb.sh /tmp/cc_p3
+~~~
+
+LNK_TESTS可用lnk、cfgchain，空格分隔。LNK_CASES支持T1～T4，
+CFGCHAIN_CASES支持P1～P4，以逗号分隔。T3会准备链路配置；T4会准备配置及流量，
+日志以CASE SETUP注明。直接运行仿真程序时使用+TJ_CASES，手动编译TB需添加
++incdir+<controller路径>/tb/common。

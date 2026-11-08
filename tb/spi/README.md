@@ -46,3 +46,17 @@ vcs -full64 -nc tb_tj_spi_timeout -o simv
 该回归检查超时后的恢复，不保证被截断写操作没有副作用。
 
 运行完整SPI回归时，在上面的状态回归编译列表中加入 `soc/design/rtl/mcu_subsys/spi/spi2ahb.v` 的绝对路径，并将TB替换为 `tb_tj_spi.sv`、展开顶层改为 `tb_tj_spi`。通过时输出 `SPI TB PASS (520 checks)`。
+
+
+## 选择性运行
+
+默认保留T1～T14完整顺序。指定SPI_CASES时，仅运行选中的场景：
+
+~~~sh
+REGRESS_TESTS=spi SPI_CASES=T5,T13 SEEDS=1 REGRESS_WORK=/tmp/spi_selected \
+  sh controller/scripts/run_regress.sh
+~~~
+
+T2包含T2b，T4包含T4b。单独T5会先产生两笔传输用于时序测量；窗口场景会准备所需的
+使能和选组配置。直接运行simv时使用+TJ_CASES=T5,T13；手动编译TB需添加
++incdir+<controller路径>/tb/common。

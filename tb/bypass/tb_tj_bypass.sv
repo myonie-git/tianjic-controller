@@ -7,6 +7,7 @@
 module tb_tj_bypass #(
   parameter bit ENABLE_BYPASS_SPI = 1'b1
 );
+  `include "tj_case_select.svh"
 
   localparam int unsigned APB_AW = 16;
 
@@ -276,6 +277,7 @@ module tb_tj_bypass #(
   int unsigned base_n;
 
   initial begin : main
+    tj_cases_init(ENABLE_BYPASS_SPI ? "P1,P2,P3,P4,P5,P6,P7,P8,P9,P10,P11,P12,P13,P14,P15,P16,P17" : "DISABLED");
     $timeformat(-9, 1, "ns", 10);
     presetn = 1'b0;
     repeat (10) @(posedge pclk);
@@ -283,316 +285,356 @@ module tb_tj_bypass #(
     repeat (10) @(posedge pclk);
 
     if (!ENABLE_BYPASS_SPI) begin
-      check_disabled();
+      if (tj_run_case("DISABLED")) check_disabled();
       if (n_err == 0) $display("BYPASS TB PASS (%0d checks)", n_chk);
       else $fatal(1, "BYPASS TB FAIL (%0d errors/%0d checks)", n_err, n_chk);
       $finish;
     end
 
     // P10a: Deselected MISO output enable.
-    chk(miso_oe == 1'b0, "P10 oe idle");
+    if (tj_case_wanted("P10")) chk(miso_oe == 1'b0, "P10 oe idle");
 
     // P1: SPI response and single-word write/read.
-    $display("== P1 活性/单字回环");
-    wbuf = new[1]; wbuf[0] = 32'h1234_ABCD;
-    spi_write(32'h0000_0100, 1, wbuf); mir[16'h0100] = 32'h1234_ABCD;
-    spi_read (32'h0000_0100, 1, rbuf);
-    chk(rbuf[0] == 32'h1234_ABCD, $sformatf("P1 rb got %08x", rbuf[0]));
+    if (tj_run_case("P1")) begin
+      $display("== P1 活性/单字回环");
+      wbuf = new[1]; wbuf[0] = 32'h1234_ABCD;
+      spi_write(32'h0000_0100, 1, wbuf); mir[16'h0100] = 32'h1234_ABCD;
+      spi_read (32'h0000_0100, 1, rbuf);
+      chk(rbuf[0] == 32'h1234_ABCD, $sformatf("P1 rb got %08x", rbuf[0]));
+    end
 
     // P2: Random single-word accesses.
-    $display("== P2 随机单字 x200");
-    for (int i = 0; i < 200; i++) begin
-      logic [APB_AW-1:0] a;
-      a = {$urandom_range(0, 16'hDFFF)} & 16'hFFFC;
-      if (a[15:8] == 8'hEE) a[15:8] = 8'h11;
-      p2_addrs[a] = 1'b1;
-      if ($urandom_range(0, 1)) begin
-        wbuf = new[1]; wbuf[0] = $urandom();
-        spi_write({16'h0, a}, 1, wbuf); mir[a] = wbuf[0];
-      end else begin
-        spi_read({16'h0, a}, 1, rbuf);
-        chk(rbuf[0] == mir_rd(a), $sformatf("P2 rd @%04x got %08x exp %08x", a, rbuf[0], mir_rd(a)));
+    if (tj_run_case("P2")) begin
+      $display("== P2 随机单字 x200");
+      for (int i = 0; i < 200; i++) begin
+        logic [APB_AW-1:0] a;
+        a = {$urandom_range(0, 16'hDFFF)} & 16'hFFFC;
+        if (a[15:8] == 8'hEE) a[15:8] = 8'h11;
+        p2_addrs[a] = 1'b1;
+        if ($urandom_range(0, 1)) begin
+          wbuf = new[1]; wbuf[0] = $urandom();
+          spi_write({16'h0, a}, 1, wbuf); mir[a] = wbuf[0];
+        end else begin
+          spi_read({16'h0, a}, 1, rbuf);
+          chk(rbuf[0] == mir_rd(a), $sformatf("P2 rd @%04x got %08x exp %08x", a, rbuf[0], mir_rd(a)));
+        end
       end
     end
 
     // P3: 64-word incrementing burst.
-    $display("== P3 64 字突发");
-    wbuf = new[64];
-    for (int i = 0; i < 64; i++) begin
-      wbuf[i] = $urandom();
-      mir[16'h2000 + 16'(4*i)] = wbuf[i];
+    if (tj_run_case("P3")) begin
+      $display("== P3 64 字突发");
+      wbuf = new[64];
+      for (int i = 0; i < 64; i++) begin
+        wbuf[i] = $urandom();
+        mir[16'h2000 + 16'(4*i)] = wbuf[i];
+      end
+      spi_write(32'h0000_2000, 64, wbuf);
+      spi_read (32'h0000_2000, 64, rbuf);
+      for (int i = 0; i < 64; i++)
+        chk(rbuf[i] == wbuf[i], $sformatf("P3 word%0d got %08x exp %08x", i, rbuf[i], wbuf[i]));
     end
-    spi_write(32'h0000_2000, 64, wbuf);
-    spi_read (32'h0000_2000, 64, rbuf);
-    for (int i = 0; i < 64; i++)
-      chk(rbuf[i] == wbuf[i], $sformatf("P3 word%0d got %08x exp %08x", i, rbuf[i], wbuf[i]));
 
     // P4: Reject multiword transfers without address increment.
-    $display("== P4 非自增多字拒绝");
-    base_n = apb_n_access;
-    spi_open();
-    spi_byte(8'h01, r8);  chk(r8 == 8'hA5, "P4 alive");     // Write two words without address increment.
-    spi_byte(8'h00, r8);  chk(r8 == 8'h01, "P4 echo");
-    spi_byte(8'h00, r8);  chk(r8 == 8'hEE, "P4 rej a1");
-    spi_byte(8'h01, r8);  chk(r8 == 8'hEE, "P4 rej a2");
-    spi_byte(8'h00, r8);  chk(r8 == 8'hEE, "P4 rej a3");
-    spi_byte(8'hAA, r8);  chk(r8 == 8'hEE, "P4 rej d0");
-    spi_close();
-    chk(apb_n_access == base_n, "P4 zero apb access");
+    if (tj_run_case("P4")) begin
+      $display("== P4 非自增多字拒绝");
+      base_n = apb_n_access;
+      spi_open();
+      spi_byte(8'h01, r8);  chk(r8 == 8'hA5, "P4 alive");     // Write two words without address increment.
+      spi_byte(8'h00, r8);  chk(r8 == 8'h01, "P4 echo");
+      spi_byte(8'h00, r8);  chk(r8 == 8'hEE, "P4 rej a1");
+      spi_byte(8'h01, r8);  chk(r8 == 8'hEE, "P4 rej a2");
+      spi_byte(8'h00, r8);  chk(r8 == 8'hEE, "P4 rej a3");
+      spi_byte(8'hAA, r8);  chk(r8 == 8'hEE, "P4 rej d0");
+      spi_close();
+      chk(apb_n_access == base_n, "P4 zero apb access");
+    end
 
     // P5: Reject addresses above the APB window.
-    $display("== P5 高位越界拒绝");
-    base_n = apb_n_access;
-    spi_open();
-    spi_byte(8'h00, r8);  chk(r8 == 8'hA5, "P5 alive");     // Single-word write.
-    spi_byte(8'h00, r8);  chk(r8 == 8'h00, "P5 echo");
-    spi_byte(8'h01, r8);                                     // Address 0x00010000.
-    spi_byte(8'h00, r8);
-    spi_byte(8'h00, r8);  chk(r8 == 8'h00, "P5 st a3(拒绝在下一字节可见)");
-    spi_byte(8'h55, r8);  chk(r8 == 8'hEE, "P5 rej d0");
-    spi_byte(8'h55, r8);  chk(r8 == 8'hEE, "P5 rej d1");
-    spi_close();
-    chk(apb_n_access == base_n, "P5 zero apb access");
+    if (tj_run_case("P5")) begin
+      $display("== P5 高位越界拒绝");
+      base_n = apb_n_access;
+      spi_open();
+      spi_byte(8'h00, r8);  chk(r8 == 8'hA5, "P5 alive");     // Single-word write.
+      spi_byte(8'h00, r8);  chk(r8 == 8'h00, "P5 echo");
+      spi_byte(8'h01, r8);                                     // Address 0x00010000.
+      spi_byte(8'h00, r8);
+      spi_byte(8'h00, r8);  chk(r8 == 8'h00, "P5 st a3(拒绝在下一字节可见)");
+      spi_byte(8'h55, r8);  chk(r8 == 8'hEE, "P5 rej d0");
+      spi_byte(8'h55, r8);  chk(r8 == 8'hEE, "P5 rej d1");
+      spi_close();
+      chk(apb_n_access == base_n, "P5 zero apb access");
+    end
 
     // P6: Abort a frame by releasing SS.
-    $display("== P6 SS 中途拔起");
-    spi_open();
-    spi_byte(8'h43, r8);                                     // Write four words with address increment.
-    spi_byte(8'h00, r8); spi_byte(8'h00, r8);
-    spi_byte(8'h30, r8); spi_byte(8'h00, r8);                // Address 0x3000.
-    for (int b = 3; b >= 0; b--) spi_byte(8'(8'h10 + b), r8); // First word: 0x13121110.
-    for (int b = 3; b >= 0; b--) spi_byte(8'(8'h20 + b), r8); // Second word.
-    spi_byte(8'h77, r8); spi_byte(8'h66, r8);                // Partial third word.
-    spi_close();
-    mir[16'h3000] = 32'h1312_1110;
-    mir[16'h3004] = 32'h2322_2120;
-    spi_read(32'h0000_3000, 1, rbuf);
-    chk(rbuf[0] == 32'h1312_1110, "P6 w0 committed");
-    spi_read(32'h0000_3004, 1, rbuf);
-    chk(rbuf[0] == 32'h2322_2120, "P6 w1 committed");
-    spi_read(32'h0000_3008, 1, rbuf);
-    chk(rbuf[0] == mem_rd(16'h3008) && !mem.exists(16'h3008), "P6 w2 not committed");
+    if (tj_run_case("P6")) begin
+      $display("== P6 SS 中途拔起");
+      spi_open();
+      spi_byte(8'h43, r8);                                     // Write four words with address increment.
+      spi_byte(8'h00, r8); spi_byte(8'h00, r8);
+      spi_byte(8'h30, r8); spi_byte(8'h00, r8);                // Address 0x3000.
+      for (int b = 3; b >= 0; b--) spi_byte(8'(8'h10 + b), r8); // First word: 0x13121110.
+      for (int b = 3; b >= 0; b--) spi_byte(8'(8'h20 + b), r8); // Second word.
+      spi_byte(8'h77, r8); spi_byte(8'h66, r8);                // Partial third word.
+      spi_close();
+      mir[16'h3000] = 32'h1312_1110;
+      mir[16'h3004] = 32'h2322_2120;
+      spi_read(32'h0000_3000, 1, rbuf);
+      chk(rbuf[0] == 32'h1312_1110, "P6 w0 committed");
+      spi_read(32'h0000_3004, 1, rbuf);
+      chk(rbuf[0] == 32'h2322_2120, "P6 w1 committed");
+      spi_read(32'h0000_3008, 1, rbuf);
+      chk(rbuf[0] == mem_rd(16'h3008) && !mem.exists(16'h3008), "P6 w2 not committed");
+    end
 
     // P7: Transfer beyond the declared length.
-    $display("== P7 超 LEN");
-    base_n = apb_n_access;
-    spi_open();
-    spi_byte(8'h40, r8);                                     // Write one word with address increment.
-    spi_byte(8'h00, r8); spi_byte(8'h00, r8);
-    spi_byte(8'h40, r8); spi_byte(8'h00, r8);                // Address 0x4000.
-    for (int b = 3; b >= 0; b--) spi_byte(8'(8'hA0 + b), r8); // Declared data word.
-    for (int b = 3; b >= 0; b--) spi_byte(8'hFF, r8);        // Extra data word.
-    spi_byte(8'h00, r8);                                     // Clock another byte to read the error status.
-    chk(r8 == 8'hEE, "P7 wr overrun st");
-    spi_close();
-    mir[16'h4000] = 32'hA3A2_A1A0;
-    chk(!mem.exists(16'h4004), "P7 extra word dropped");
-    // Read one extra byte after a single-word transfer.
-    spi_open();
-    spi_byte(8'hC0, r8);                                     // Read one word with address increment.
-    spi_byte(8'h00, r8); spi_byte(8'h00, r8);
-    spi_byte(8'h40, r8); spi_byte(8'h00, r8);
-    spi_byte(8'h00, r8); spi_byte(8'h00, r8);                // turnaround
-    for (int b = 0; b < 4; b++) spi_byte(8'h00, r8);
-    spi_byte(8'h00, r8);
-    chk(r8 == 8'hEE, "P7 rd overrun st");
-    spi_close();
+    if (tj_run_case("P7")) begin
+      $display("== P7 超 LEN");
+      base_n = apb_n_access;
+      spi_open();
+      spi_byte(8'h40, r8);                                     // Write one word with address increment.
+      spi_byte(8'h00, r8); spi_byte(8'h00, r8);
+      spi_byte(8'h40, r8); spi_byte(8'h00, r8);                // Address 0x4000.
+      for (int b = 3; b >= 0; b--) spi_byte(8'(8'hA0 + b), r8); // Declared data word.
+      for (int b = 3; b >= 0; b--) spi_byte(8'hFF, r8);        // Extra data word.
+      spi_byte(8'h00, r8);                                     // Clock another byte to read the error status.
+      chk(r8 == 8'hEE, "P7 wr overrun st");
+      spi_close();
+      mir[16'h4000] = 32'hA3A2_A1A0;
+      chk(!mem.exists(16'h4004), "P7 extra word dropped");
+      // Read one extra byte after a single-word transfer.
+      spi_open();
+      spi_byte(8'hC0, r8);                                     // Read one word with address increment.
+      spi_byte(8'h00, r8); spi_byte(8'h00, r8);
+      spi_byte(8'h40, r8); spi_byte(8'h00, r8);
+      spi_byte(8'h00, r8); spi_byte(8'h00, r8);                // turnaround
+      for (int b = 0; b < 4; b++) spi_byte(8'h00, r8);
+      spi_byte(8'h00, r8);
+      chk(r8 == 8'hEE, "P7 rd overrun st");
+      spi_close();
+    end
 
     // P8: Concurrent upstream APB and SPI traffic.
-    $display("== P8 上游并发");
-    fork
-      begin : up_traffic
-        logic [31:0] rd; bit sl;
-        for (int i = 0; i < 100; i++) begin
-          logic [APB_AW-1:0] a;
-          a = 16'h5000 + 16'(4 * $urandom_range(0, 63));
-          p8_addrs[a] = 1'b1;
-          if ($urandom_range(0, 1)) begin
-            logic [31:0] d;
-            d = $urandom();
-            p8_write_data[d] = 1'b1;
-            up_xfer(1'b1, a, d, rd, sl);
-            mir[a] = d;
-            chk(!sl, "P8 up wr slverr");
-          end else begin
-            up_xfer(1'b0, a, 32'h0, rd, sl);
-            chk(rd == mir_rd(a), $sformatf("P8 up rd @%04x got %08x exp %08x", a, rd, mir_rd(a)));
-            chk(!sl, "P8 up rd slverr");
+    if (tj_run_case("P8")) begin
+      $display("== P8 上游并发");
+      fork
+        begin : up_traffic
+          logic [31:0] rd; bit sl;
+          for (int i = 0; i < 100; i++) begin
+            logic [APB_AW-1:0] a;
+            a = 16'h5000 + 16'(4 * $urandom_range(0, 63));
+            p8_addrs[a] = 1'b1;
+            if ($urandom_range(0, 1)) begin
+              logic [31:0] d;
+              d = $urandom();
+              p8_write_data[d] = 1'b1;
+              up_xfer(1'b1, a, d, rd, sl);
+              mir[a] = d;
+              chk(!sl, "P8 up wr slverr");
+            end else begin
+              up_xfer(1'b0, a, 32'h0, rd, sl);
+              chk(rd == mir_rd(a), $sformatf("P8 up rd @%04x got %08x exp %08x", a, rd, mir_rd(a)));
+              chk(!sl, "P8 up rd slverr");
+            end
           end
         end
-      end
-      begin : spi_traffic
-        wbuf = new[32];
-        for (int i = 0; i < 32; i++) begin
-          wbuf[i] = $urandom();
-          mir[16'h6000 + 16'(4*i)] = wbuf[i];
+        begin : spi_traffic
+          wbuf = new[32];
+          for (int i = 0; i < 32; i++) begin
+            wbuf[i] = $urandom();
+            mir[16'h6000 + 16'(4*i)] = wbuf[i];
+          end
+          spi_write(32'h0000_6000, 32, wbuf);
+          spi_read (32'h0000_6000, 32, rbuf);
+          for (int i = 0; i < 32; i++)
+            chk(rbuf[i] == wbuf[i], $sformatf("P8 spi word%0d", i));
         end
-        spi_write(32'h0000_6000, 32, wbuf);
-        spi_read (32'h0000_6000, 32, rbuf);
-        for (int i = 0; i < 32; i++)
-          chk(rbuf[i] == wbuf[i], $sformatf("P8 spi word%0d", i));
-      end
-    join
+      join
+    end
 
     // P9: Sticky APB error and recovery on the next frame.
-    $display("== P9 pslverr");
-    wbuf = new[2]; wbuf[0] = 32'h1; wbuf[1] = 32'h2;
-    spi_open();
-    spi_byte(8'h41, r8);                                     // Write two words with address increment.
-    spi_byte(8'h00, r8); spi_byte(8'h00, r8);
-    spi_byte(8'hEE, r8); spi_byte(8'h00, r8);                // Address 0xEE00 returns an APB error.
-    for (int b = 3; b >= 0; b--) spi_byte(8'h11, r8);
-    for (int b = 3; b >= 0; b--) spi_byte(8'h22, r8);
-    chk(r8 == 8'hEE, "P9 slverr sticky");
-    spi_close();
-    spi_read(32'h0000_0100, 1, rbuf);                        // Read a valid address in a new frame.
-    chk(rbuf[0] == mir_rd(16'h0100), "P9 next frame clean");
+    if (tj_run_case("P9")) begin
+      $display("== P9 pslverr");
+      wbuf = new[2]; wbuf[0] = 32'h1; wbuf[1] = 32'h2;
+      spi_open();
+      spi_byte(8'h41, r8);                                     // Write two words with address increment.
+      spi_byte(8'h00, r8); spi_byte(8'h00, r8);
+      spi_byte(8'hEE, r8); spi_byte(8'h00, r8);                // Address 0xEE00 returns an APB error.
+      for (int b = 3; b >= 0; b--) spi_byte(8'h11, r8);
+      for (int b = 3; b >= 0; b--) spi_byte(8'h22, r8);
+      chk(r8 == 8'hEE, "P9 slverr sticky");
+      spi_close();
+      spi_read(32'h0000_0100, 1, rbuf);                        // Read a valid address in a new frame.
+      chk(rbuf[0] == mir_rd(16'h0100), "P9 next frame clean");
+    end
 
     // P10b: MISO output enable during a frame.
-    spi_open();
-    spi_byte(8'h00, r8);
-    chk(miso_oe == 1'b1, "P10 oe active");
-    spi_close();
-    chk(miso_oe == 1'b0, "P10 oe released");
+    if (tj_run_case("P10")) begin
+      spi_open();
+      spi_byte(8'h00, r8);
+      chk(miso_oe == 1'b1, "P10 oe active");
+      spi_close();
+      chk(miso_oe == 1'b0, "P10 oe released");
+    end
 
     // P11: Maximum SPI clock rate (SCLK = pclk/8).
-    $display("== P11 SCLK=pclk/8 边界");
-    sclk_hp = 20.0;                                          // 25 MHz with pclk = 200 MHz.
-    wbuf = new[8];
-    for (int i = 0; i < 8; i++) begin
-      wbuf[i] = $urandom();
-      mir[16'h7000 + 16'(4*i)] = wbuf[i];
+    if (tj_run_case("P11")) begin
+      $display("== P11 SCLK=pclk/8 边界");
+      sclk_hp = 20.0;                                          // 25 MHz with pclk = 200 MHz.
+      wbuf = new[8];
+      for (int i = 0; i < 8; i++) begin
+        wbuf[i] = $urandom();
+        mir[16'h7000 + 16'(4*i)] = wbuf[i];
+      end
+      spi_write(32'h0000_7000, 8, wbuf);
+      spi_read (32'h0000_7000, 8, rbuf);
+      for (int i = 0; i < 8; i++)
+        chk(rbuf[i] == wbuf[i], $sformatf("P11 word%0d got %08x exp %08x", i, rbuf[i], wbuf[i]));
     end
-    spi_write(32'h0000_7000, 8, wbuf);
-    spi_read (32'h0000_7000, 8, rbuf);
-    for (int i = 0; i < 8; i++)
-      chk(rbuf[i] == wbuf[i], $sformatf("P11 word%0d got %08x exp %08x", i, rbuf[i], wbuf[i]));
 
     // P12: Back-to-back upstream APB transfers.
-    $display("== P12 上游 back-to-back");
-    up_b2b_wr(8, 16'h0800);
-    spi_read(32'h0000_0800, 8, rbuf);
-    for (int i = 0; i < 8; i++)
-      chk(rbuf[i] == 32'hB2B0_0000 + 32'(i), $sformatf("P12 word%0d got %08x", i, rbuf[i]));
+    if (tj_run_case("P12")) begin
+      if (tj_case_filter_active) sclk_hp = 20.0;
+      $display("== P12 上游 back-to-back");
+      up_b2b_wr(8, 16'h0800);
+      spi_read(32'h0000_0800, 8, rbuf);
+      for (int i = 0; i < 8; i++)
+        chk(rbuf[i] == 32'hB2B0_0000 + 32'(i), $sformatf("P12 word%0d got %08x", i, rbuf[i]));
+    end
 
     // P13: Late APB responses after a frame is aborted.
-    $display("== P13 帧中止跨帧响应");
-    wbuf = new[1];
-    wbuf[0] = 32'hAAAA_0001; spi_write(32'h0000_9000, 1, wbuf); mir[16'h9000] = wbuf[0];
-    wbuf[0] = 32'hBBBB_0002; spi_write(32'h0000_9100, 1, wbuf); mir[16'h9100] = wbuf[0];
-    // Abort a delayed read, then start a new read frame.
-    wait_max = 40;
-    ss_n = 1'b0; #(50.0);
-    spi_byte(8'hC1, r8);                                     // Read two words from 0x9000.
-    spi_byte(8'h00, r8); spi_byte(8'h00, r8);
-    spi_byte(8'h90, r8); spi_byte(8'h00, r8);
-    #(30.0); ss_n = 1'b1; mosi = 1'b0;
-    #(40.0);                                                 // Minimum SS high time: 8 pclk cycles.
-    wait_max = 3;
-    spi_read(32'h0000_9100, 1, rbuf);                        // Check data from the new frame.
-    chk(rbuf[0] == 32'hBBBB_0002, $sformatf("P13A cross-frame stale data got %08x", rbuf[0]));
-    // Abort a write with a delayed APB error, then start a valid frame.
-    wait_max = 40;
-    ss_n = 1'b0; #(50.0);
-    spi_byte(8'h40, r8);                                     // Write one word to 0xEE00.
-    spi_byte(8'h00, r8); spi_byte(8'h00, r8);
-    spi_byte(8'hEE, r8); spi_byte(8'h00, r8);
-    for (int b = 3; b >= 0; b--) spi_byte(8'h5A, r8);
-    #(30.0); ss_n = 1'b1; mosi = 1'b0;
-    #(40.0);
-    wait_max = 3;
-    spi_read(32'h0000_9000, 1, rbuf);                        // Check the turnaround status.
-    chk(rbuf[0] == 32'hAAAA_0001, "P13B after cross-frame slverr");
+    if (tj_run_case("P13")) begin
+      if (tj_case_filter_active) sclk_hp = 20.0;
+      $display("== P13 帧中止跨帧响应");
+      wbuf = new[1];
+      wbuf[0] = 32'hAAAA_0001; spi_write(32'h0000_9000, 1, wbuf); mir[16'h9000] = wbuf[0];
+      wbuf[0] = 32'hBBBB_0002; spi_write(32'h0000_9100, 1, wbuf); mir[16'h9100] = wbuf[0];
+      // Abort a delayed read, then start a new read frame.
+      wait_max = 40;
+      ss_n = 1'b0; #(50.0);
+      spi_byte(8'hC1, r8);                                     // Read two words from 0x9000.
+      spi_byte(8'h00, r8); spi_byte(8'h00, r8);
+      spi_byte(8'h90, r8); spi_byte(8'h00, r8);
+      #(30.0); ss_n = 1'b1; mosi = 1'b0;
+      #(40.0);                                                 // Minimum SS high time: 8 pclk cycles.
+      wait_max = 3;
+      spi_read(32'h0000_9100, 1, rbuf);                        // Check data from the new frame.
+      chk(rbuf[0] == 32'hBBBB_0002, $sformatf("P13A cross-frame stale data got %08x", rbuf[0]));
+      // Abort a write with a delayed APB error, then start a valid frame.
+      wait_max = 40;
+      ss_n = 1'b0; #(50.0);
+      spi_byte(8'h40, r8);                                     // Write one word to 0xEE00.
+      spi_byte(8'h00, r8); spi_byte(8'h00, r8);
+      spi_byte(8'hEE, r8); spi_byte(8'h00, r8);
+      for (int b = 3; b >= 0; b--) spi_byte(8'h5A, r8);
+      #(30.0); ss_n = 1'b1; mosi = 1'b0;
+      #(40.0);
+      wait_max = 3;
+      spi_read(32'h0000_9000, 1, rbuf);                        // Check the turnaround status.
+      chk(rbuf[0] == 32'hAAAA_0001, "P13B after cross-frame slverr");
+    end
 
     // Slow writes stop at the first dropped word instead of shifting later data.
-    begin
-      logic [31:0] saved [6];
-      wait_min = 320;
-      wait_max = 320;
-      wbuf = new[6];
-      for (int i = 0; i < 6; i++) begin
-        saved[i] = mem_rd(16'hA000 + 16'(4*i));
-        wbuf[i] = 32'h5100_0000 + 32'(i);
+    if (tj_run_case("P14")) begin
+      if (tj_case_filter_active) sclk_hp = 20.0;
+      begin
+        logic [31:0] saved [6];
+        wait_min = 320;
+        wait_max = 320;
+        wbuf = new[6];
+        for (int i = 0; i < 6; i++) begin
+          saved[i] = mem_rd(16'hA000 + 16'(4*i));
+          wbuf[i] = 32'h5100_0000 + 32'(i);
+        end
+        base_n = apb_n_access;
+        spi_write(32'h0000_A000, 6, wbuf);
+        repeat (500) @(posedge pclk);
+        chk(apb_n_access == base_n + 1, "Slow write stops after the outstanding word");
+        chk(mem_rd(16'hA000) === wbuf[0], "Slow write commits the accepted word");
+        for (int i = 1; i < 6; i++)
+          chk(mem_rd(16'hA000 + 16'(4*i)) === saved[i],
+              "Slow write leaves later addresses untouched");
       end
-      base_n = apb_n_access;
-      spi_write(32'h0000_A000, 6, wbuf);
-      repeat (500) @(posedge pclk);
-      chk(apb_n_access == base_n + 1, "Slow write stops after the outstanding word");
-      chk(mem_rd(16'hA000) === wbuf[0], "Slow write commits the accepted word");
-      for (int i = 1; i < 6; i++)
-        chk(mem_rd(16'hA000 + 16'(4*i)) === saved[i],
-            "Slow write leaves later addresses untouched");
     end
 
     // A read underrun stops further prefetch requests.
-    wait_min = 400;
-    wait_max = 400;
-    base_n = apb_n_access;
-    spi_read(32'h0000_B000, 8, rbuf, 1'b0);
-    repeat (500) @(posedge pclk);
-    chk(apb_n_access == base_n + 1, "Read underrun stops prefetch");
-    foreach (rbuf[i])
-      chk(rbuf[i] === 32'hEEEE_EEEE, "Read underrun returns sticky error bytes");
+    if (tj_run_case("P15")) begin
+      if (tj_case_filter_active) sclk_hp = 20.0;
+      wait_min = 400;
+      wait_max = 400;
+      base_n = apb_n_access;
+      spi_read(32'h0000_B000, 8, rbuf, 1'b0);
+      repeat (500) @(posedge pclk);
+      chk(apb_n_access == base_n + 1, "Read underrun stops prefetch");
+      foreach (rbuf[i])
+        chk(rbuf[i] === 32'hEEEE_EEEE, "Read underrun returns sticky error bytes");
+    end
 
     // An APB error terminates further reads or writes in the frame.
-    wait_min = 0;
-    wait_max = 3;
-    base_n = apb_n_access;
-    spi_read(32'h0000_EE00, 4, rbuf, 1'b0);
-    chk(apb_n_access == base_n + 1, "APB read error stops prefetch");
-    foreach (rbuf[i])
-      chk(rbuf[i] === 32'hEEEE_EEEE, "APB read error remains visible");
-    base_n = apb_n_access;
-    wbuf = new[4];
-    foreach (wbuf[i]) wbuf[i] = 32'h5200_0000 + 32'(i);
-    spi_write(32'h0000_EE00, 4, wbuf);
-    chk(apb_n_access == base_n + 1, "APB write error stops later writes");
-    spi_read(32'h0000_0100, 1, rbuf);
-    chk(rbuf[0] === mem_rd(16'h0100), "A fresh frame recovers after an APB error");
+    if (tj_run_case("P16")) begin
+      if (tj_case_filter_active) sclk_hp = 20.0;
+      wait_min = 0;
+      wait_max = 3;
+      base_n = apb_n_access;
+      spi_read(32'h0000_EE00, 4, rbuf, 1'b0);
+      chk(apb_n_access == base_n + 1, "APB read error stops prefetch");
+      foreach (rbuf[i])
+        chk(rbuf[i] === 32'hEEEE_EEEE, "APB read error remains visible");
+      base_n = apb_n_access;
+      wbuf = new[4];
+      foreach (wbuf[i]) wbuf[i] = 32'h5200_0000 + 32'(i);
+      spi_write(32'h0000_EE00, 4, wbuf);
+      chk(apb_n_access == base_n + 1, "APB write error stops later writes");
+      spi_read(32'h0000_0100, 1, rbuf);
+      chk(rbuf[0] === mem_rd(16'h0100), "A fresh frame recovers after an APB error");
+    end
 
     // Pause SCLK with SS low when accessing a slow target.
-    wait_min = 400;
-    wait_max = 400;
-    spi_open();
-    spi_byte(8'h80, r8);
-    spi_byte(8'h00, r8);
-    spi_byte(8'h00, r8);
-    spi_byte(8'h01, r8);
-    spi_byte(8'h00, r8);
-    repeat (500) @(posedge pclk);
-    spi_byte(8'h00, r8);
-    chk(r8 == 8'h00, "Paused read first turnaround status");
-    spi_byte(8'h00, r8);
-    chk(r8 == 8'h00, "Paused read second turnaround status");
-    rbuf = new[1];
-    for (int b = 3; b >= 0; b--)
-      spi_byte(8'h00, rbuf[0][8*b +: 8]);
-    spi_close();
-    chk(rbuf[0] === mem_rd(16'h0100), "Paused read returns the complete word");
-
-    for (int target = 0; target < 2; target++) begin
-      logic [31:0] addr;
-      addr = target == 0 ? 32'h0000_F000 : 32'h0000_EE00;
+    if (tj_run_case("P17")) begin
+      if (tj_case_filter_active) sclk_hp = 20.0;
+      wait_min = 400;
+      wait_max = 400;
       spi_open();
+      spi_byte(8'h80, r8);
       spi_byte(8'h00, r8);
-      for (int b = 3; b >= 0; b--) spi_byte(addr[8*b +: 8], r8);
-      repeat (4) spi_byte(8'h5A, r8);
+      spi_byte(8'h00, r8);
+      spi_byte(8'h01, r8);
+      spi_byte(8'h00, r8);
       repeat (500) @(posedge pclk);
       spi_byte(8'h00, r8);
+      chk(r8 == 8'h00, "Paused read first turnaround status");
       spi_byte(8'h00, r8);
-      chk(r8 == (target == 0 ? 8'h00 : 8'hEE),
-          "Paused write reports its result in the second status byte");
+      chk(r8 == 8'h00, "Paused read second turnaround status");
+      rbuf = new[1];
+      for (int b = 3; b >= 0; b--)
+        spi_byte(8'h00, rbuf[0][8*b +: 8]);
       spi_close();
-    end
-    chk(mem_rd(16'hF000) === 32'h5A5A_5A5A, "Paused write reaches the target");
-    wait_min = 0;
-    wait_max = 3;
-    spi_read(32'h0000_F000, 1, rbuf);
-    chk(rbuf[0] === 32'h5A5A_5A5A, "A fresh frame recovers after a paused error");
+      chk(rbuf[0] === mem_rd(16'h0100), "Paused read returns the complete word");
 
-    chk(p2_addrs.num() > 1, "P2 generates multiple addresses");
-    chk(p8_addrs.num() > 1, "P8 generates multiple addresses");
-    chk(p8_write_data.num() > 1, "P8 generates multiple write values");
+      for (int target = 0; target < 2; target++) begin
+        logic [31:0] addr;
+        addr = target == 0 ? 32'h0000_F000 : 32'h0000_EE00;
+        spi_open();
+        spi_byte(8'h00, r8);
+        for (int b = 3; b >= 0; b--) spi_byte(addr[8*b +: 8], r8);
+        repeat (4) spi_byte(8'h5A, r8);
+        repeat (500) @(posedge pclk);
+        spi_byte(8'h00, r8);
+        spi_byte(8'h00, r8);
+        chk(r8 == (target == 0 ? 8'h00 : 8'hEE),
+            "Paused write reports its result in the second status byte");
+        spi_close();
+      end
+      chk(mem_rd(16'hF000) === 32'h5A5A_5A5A, "Paused write reaches the target");
+      wait_min = 0;
+      wait_max = 3;
+      spi_read(32'h0000_F000, 1, rbuf);
+      chk(rbuf[0] === 32'h5A5A_5A5A, "A fresh frame recovers after a paused error");
+    end
+
+    if (tj_case_wanted("P2")) chk(p2_addrs.num() > 1, "P2 generates multiple addresses");
+    if (tj_case_wanted("P8")) chk(p8_addrs.num() > 1, "P8 generates multiple addresses");
+    if (tj_case_wanted("P8")) chk(p8_write_data.num() > 1, "P8 generates multiple write values");
     $display("BYPASS COVERAGE: P2 addresses=%0d P8 addresses=%0d P8 write data=%0d",
              p2_addrs.num(), p8_addrs.num(), p8_write_data.num());
 

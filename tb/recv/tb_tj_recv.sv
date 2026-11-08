@@ -4,6 +4,7 @@
 // Requires tj_ctrl_top; clock half-periods are configurable through plusargs.
 `timescale 1ns/1ps
 module tb_tj_recv;
+  `include "tj_case_select.svh"
   real pclk_hp = 5.0, maxi_hp = 1.2;
   initial begin
     void'($value$plusargs("TJ_PCLK_HP=%f", pclk_hp));
@@ -332,6 +333,7 @@ module tb_tj_recv;
   int unsigned base_wp, loopback_writes;
 
   initial begin
+    tj_cases_init("P1,P2,P3,P4,P5,P6,P7,P8,P9,P10,P11");
     psel = 0; penable = 0; pwrite = 0; paddr = '0; pwdata = '0;
     drv_v = '0; drv_d = '0; loop_en = 0;
     foreach (rptr_sh[i]) begin rptr_sh[i] = 0; wr_rsp_count[i] = 0; tag_seen[i] = 0; end
@@ -348,316 +350,338 @@ module tb_tj_recv;
     apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
 
     // P1: Three channels, ring wrap and unused-port discard.
-    for (int n = 0; n < 12; n++)
-      for (int c = 0; c < 3; c++) feed(c, 1'b0);
-    send_rx(3, 96'hDEAD_0000_DEAD_0000_DEAD_0000);  // Unused port 3.
-    consume(0, 12); consume(1, 12); consume(2, 12);
-    // Let the RPTR snapshot release space before a new drop-mode burst.
-    cfg_settle();
-    // Wrap the 16-record channel 2 ring.
-    for (int n = 0; n < 24; n++) begin
-      feed(2, 1'b0);
-      if (n % 8 == 7) consume(2, rptr_sh[2] + 8);
+    if (tj_run_case("P1")) begin
+      for (int n = 0; n < 12; n++)
+        for (int c = 0; c < 3; c++) feed(c, 1'b0);
+      send_rx(3, 96'hDEAD_0000_DEAD_0000_DEAD_0000);  // Unused port 3.
+      consume(0, 12); consume(1, 12); consume(2, 12);
+      // Let the RPTR snapshot release space before a new drop-mode burst.
+      cfg_settle();
+      // Wrap the 16-record channel 2 ring.
+      for (int n = 0; n < 24; n++) begin
+        feed(2, 1'b0);
+        if (n % 8 == 7) consume(2, rptr_sh[2] + 8);
+      end
+      consume(2, 36);
+      chk(exp_q[0].size() == 0 && exp_q[1].size() == 0 && exp_q[2].size() == 0,
+          "P1: all expected records checked");
+      $display("P1 done (%0d checks, %0d errs)", checks, errs);
     end
-    consume(2, 36);
-    chk(exp_q[0].size() == 0 && exp_q[1].size() == 0 && exp_q[2].size() == 0,
-        "P1: all expected records checked");
-    $display("P1 done (%0d checks, %0d errs)", checks, errs);
 
     // P2: Watermark crossing and rearming.
-    events_settle();
-    apb_wr(A_RV(1, 8'h14), 32'h7);  // Clear sticky events.
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    for (int n = 0; n < 8; n++) feed(1, 1'b0);  // Reach the watermark of eight records.
-    v = 0;
-    for (int t = 0; t < 3000 * tscale && !v[0]; t++) apb_rd(A_RV(1, 8'h14), v);
-    chk(v[0], "P2: WMARK_HIT");
-    apb_rd(A_IRQ_RAW, v2);
-    chk(v2[13], "P2: channel 1 watermark interrupt");
-    apb_wr(A_RV(1, 8'h14), 32'h7);
-    apb_rd(A_RV(1, 8'h14), v);
-    chk(!v[0], "P2: W1C clears the watermark event");
-    consume(1, rptr_sh[1] + 8);  // Drain the ring.
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    for (int n = 0; n < 8; n++) feed(1, 1'b0);  // Cross the watermark again.
-    v = 0;
-    for (int t = 0; t < 3000 * tscale && !v[0]; t++) apb_rd(A_RV(1, 8'h14), v);
-    chk(v[0], "P2: watermark retriggers after consumption");
-    apb_wr(A_RV(1, 8'h14), 32'h7);
-    consume(1, rptr_sh[1] + 8);
-    $display("P2 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P2")) begin
+      events_settle();
+      apb_wr(A_RV(1, 8'h14), 32'h7);  // Clear sticky events.
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      for (int n = 0; n < 8; n++) feed(1, 1'b0);  // Reach the watermark of eight records.
+      v = 0;
+      for (int t = 0; t < 3000 * tscale && !v[0]; t++) apb_rd(A_RV(1, 8'h14), v);
+      chk(v[0], "P2: WMARK_HIT");
+      apb_rd(A_IRQ_RAW, v2);
+      chk(v2[13], "P2: channel 1 watermark interrupt");
+      apb_wr(A_RV(1, 8'h14), 32'h7);
+      apb_rd(A_RV(1, 8'h14), v);
+      chk(!v[0], "P2: W1C clears the watermark event");
+      consume(1, rptr_sh[1] + 8);  // Drain the ring.
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      for (int n = 0; n < 8; n++) feed(1, 1'b0);  // Cross the watermark again.
+      v = 0;
+      for (int t = 0; t < 3000 * tscale && !v[0]; t++) apb_rd(A_RV(1, 8'h14), v);
+      chk(v[0], "P2: watermark retriggers after consumption");
+      apb_wr(A_RV(1, 8'h14), 32'h7);
+      consume(1, rptr_sh[1] + 8);
+      $display("P2 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P3: END flags and interrupt enables.
-    events_settle();
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    feed(0, 1'b1);  // Channel 0 END interrupt enabled.
-    v = 0;
-    for (int t = 0; t < 3000 * tscale && !v[1]; t++) apb_rd(A_RV(0, 8'h14), v);
-    chk(v[1], "P3: ch0 ENDPKT");
-    apb_rd(A_IRQ_RAW, v2);
-    chk(v2[12], "P3: channel 0 END interrupt enabled");
-    feed(2, 1'b1);  // Channel 2 END interrupt disabled.
-    v = 0;
-    for (int t = 0; t < 3000 * tscale && !v[1]; t++) apb_rd(A_RV(2, 8'h14), v);
-    chk(v[1], "P3: channel 2 END status is independent of interrupt enable");
-    apb_rd(A_IRQ_RAW, v2);
-    chk(!v2[14], "P3: channel 2 END interrupt disabled");
-    apb_wr(A_RV(0, 8'h14), 32'h7); apb_wr(A_RV(2, 8'h14), 32'h7);
-    consume(0, rptr_sh[0] + 1); consume(2, rptr_sh[2] + 1);
-    $display("P3 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P3")) begin
+      events_settle();
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      feed(0, 1'b1);  // Channel 0 END interrupt enabled.
+      v = 0;
+      for (int t = 0; t < 3000 * tscale && !v[1]; t++) apb_rd(A_RV(0, 8'h14), v);
+      chk(v[1], "P3: ch0 ENDPKT");
+      apb_rd(A_IRQ_RAW, v2);
+      chk(v2[12], "P3: channel 0 END interrupt enabled");
+      feed(2, 1'b1);  // Channel 2 END interrupt disabled.
+      v = 0;
+      for (int t = 0; t < 3000 * tscale && !v[1]; t++) apb_rd(A_RV(2, 8'h14), v);
+      chk(v[1], "P3: channel 2 END status is independent of interrupt enable");
+      apb_rd(A_IRQ_RAW, v2);
+      chk(!v2[14], "P3: channel 2 END interrupt disabled");
+      apb_wr(A_RV(0, 8'h14), 32'h7); apb_wr(A_RV(2, 8'h14), 32'h7);
+      consume(0, rptr_sh[0] + 1); consume(2, rptr_sh[2] + 1);
+      $display("P3 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P4: Drop on overflow and preserve unread records.
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    for (int n = 0; n < 16; n++) feed(2, 1'b0);  // Fill the 16-record ring.
-    // Wait for every write response before injecting overflow packets.
-    v = 0;
-    for (int t = 0; t < 3000 * tscale && v != rptr_sh[2] + 16; t++) apb_rd(A_RV(2, 8'h18), v);
-    chk(v == rptr_sh[2] + 16, "P4: all 16 ring writes completed");
-    for (int n = 0; n < 4; n++)
-      send_rx(2, mk_pkt(1'b0));  // Overflow packets have no expected ring records.
-    v = 0;
-    for (int t = 0; t < 3000 * tscale && !v[2]; t++) apb_rd(A_RV(2, 8'h14), v);
-    chk(v[2], "P4: overflow status set");
-    apb_rd(A_IRQ_RAW, v2);
-    chk(v2[27], "P4: overflow interrupt set");
-    apb_rd(A_RV(2, 8'h18), v);
-    chk(v == rptr_sh[2] + 16, $sformatf("P4: WPTR stays at 16 records (got %0d)", v - rptr_sh[2]));
-    apb_wr(A_RV(2, 8'h14), 32'h7); apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    consume(2, rptr_sh[2] + 16);  // Check the sixteen retained records.
-    $display("P4 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P4")) begin
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      for (int n = 0; n < 16; n++) feed(2, 1'b0);  // Fill the 16-record ring.
+      // Wait for every write response before injecting overflow packets.
+      v = 0;
+      for (int t = 0; t < 3000 * tscale && v != rptr_sh[2] + 16; t++) apb_rd(A_RV(2, 8'h18), v);
+      chk(v == rptr_sh[2] + 16, "P4: all 16 ring writes completed");
+      for (int n = 0; n < 4; n++)
+        send_rx(2, mk_pkt(1'b0));  // Overflow packets have no expected ring records.
+      v = 0;
+      for (int t = 0; t < 3000 * tscale && !v[2]; t++) apb_rd(A_RV(2, 8'h14), v);
+      chk(v[2], "P4: overflow status set");
+      apb_rd(A_IRQ_RAW, v2);
+      chk(v2[27], "P4: overflow interrupt set");
+      apb_rd(A_RV(2, 8'h18), v);
+      chk(v == rptr_sh[2] + 16, $sformatf("P4: WPTR stays at 16 records (got %0d)", v - rptr_sh[2]));
+      apb_wr(A_RV(2, 8'h14), 32'h7); apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      consume(2, rptr_sh[2] + 16);  // Check the sixteen retained records.
+      $display("P4 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P5: Backpressure with concurrent host consumption.
-    apb_wr(A_RV(1, 8'h10), 32'h0);  // Disable the channel.
-    apb_wr(A_RV(1, 8'h10), 32'h0303);  // Enable backpressure and both event interrupts.
-    cfg_settle();
-    fork
-      begin : t_feed
-        for (int n = 0; n < 48; n++) feed(1, n == 47);  // Send 48 records into a 32-record ring.
-      end
-      begin : t_cons
-        logic [31:0] wp;
-        wp = 0;
-        for (int n = 0; n < 3000 && wp != rptr_sh[1] + 32; n++)
-          apb_rd(A_RV(1, 8'h18), wp);
-        chk(wp == rptr_sh[1] + 32, "P5: ring is full before host consumption");
-        chk(lv_rx_tready[1] == 1'b0, "P5: full ring backpressures port 1");
-        consume(1, rptr_sh[1] + 48);
-      end
-    join
-    consume(1, rptr_sh[1]);  // Finish any remaining host consumption.
-    chk(exp_q[1].size() == 0, "P5: all 48 records checked without loss");
-    $display("P5 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P5")) begin
+      apb_wr(A_RV(1, 8'h10), 32'h0);  // Disable the channel.
+      apb_wr(A_RV(1, 8'h10), 32'h0303);  // Enable backpressure and both event interrupts.
+      cfg_settle();
+      fork
+        begin : t_feed
+          for (int n = 0; n < 48; n++) feed(1, n == 47);  // Send 48 records into a 32-record ring.
+        end
+        begin : t_cons
+          logic [31:0] wp;
+          wp = 0;
+          for (int n = 0; n < 3000 && wp != rptr_sh[1] + 32; n++)
+            apb_rd(A_RV(1, 8'h18), wp);
+          chk(wp == rptr_sh[1] + 32, "P5: ring is full before host consumption");
+          chk(lv_rx_tready[1] == 1'b0, "P5: full ring backpressures port 1");
+          consume(1, rptr_sh[1] + 48);
+        end
+      join
+      consume(1, rptr_sh[1]);  // Finish any remaining host consumption.
+      chk(exp_q[1].size() == 0, "P5: all 48 records checked without loss");
+      $display("P5 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P6: Disabled-channel discard.
-    apb_rd(A_RV(0, 8'h18), v); base_wp = v;
-    apb_wr(A_RV(0, 8'h10), 32'h0);  // Disable channel 0.
-    cfg_settle();
-    // Discarded packets are excluded from the reference queue.
-    for (int n = 0; n < 5; n++) send_rx(0, mk_pkt(1'b0));
-    #2us;
-    apb_rd(A_RV(0, 8'h18), v);
-    chk(v == base_wp, "P6: WPTR stays unchanged while disabled");
-    apb_rd(A_RV(0, 8'h14), v);
-    chk(!v[2], "P6: disabled discard does not set OVF");
-    apb_wr(A_RV(0, 8'h10), 32'h0301);  // Re-enable channel 0 with drop-on-overflow policy.
-    cfg_settle();
-    feed(0, 1'b0); consume(0, rptr_sh[0] + 1);
-    $display("P6 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P6")) begin
+      apb_rd(A_RV(0, 8'h18), v); base_wp = v;
+      apb_wr(A_RV(0, 8'h10), 32'h0);  // Disable channel 0.
+      cfg_settle();
+      // Discarded packets are excluded from the reference queue.
+      for (int n = 0; n < 5; n++) send_rx(0, mk_pkt(1'b0));
+      #2us;
+      apb_rd(A_RV(0, 8'h18), v);
+      chk(v == base_wp, "P6: WPTR stays unchanged while disabled");
+      apb_rd(A_RV(0, 8'h14), v);
+      chk(!v[2], "P6: disabled discard does not set OVF");
+      apb_wr(A_RV(0, 8'h10), 32'h0301);  // Re-enable channel 0 with drop-on-overflow policy.
+      cfg_settle();
+      feed(0, 1'b0); consume(0, rptr_sh[0] + 1);
+      $display("P6 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P7: AXI write-error notification.
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    ring_cfg(0, 64'h100_0000_0000, 64, 8, 1'b0, 1'b1, 1'b1);  // Select the error address region.
-    send_rx(0, mk_pkt(1'b0));  // The failed write has no valid expected record.
-    v = 0;
-    for (int t = 0; t < 3000 * tscale && !v[28]; t++) apb_rd(A_IRQ_RAW, v);
-    chk(v[28], "P7: AXI write error interrupt set");
-    apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
-    // An error response still advances WPTR; skip that slot before recovery.
-    rptr_sh[0]++;  // Skip the failed write slot.
-    apb_wr(A_RV(0, 8'h1C), rptr_sh[0]);
-    ring_cfg(0, 64'h0000_2000_0000, 64, 8, 1'b0, 1'b1, 1'b1);
-    feed(0, 1'b0); consume(0, rptr_sh[0] + 1);
-    $display("P7 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P7")) begin
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      ring_cfg(0, 64'h100_0000_0000, 64, 8, 1'b0, 1'b1, 1'b1);  // Select the error address region.
+      send_rx(0, mk_pkt(1'b0));  // The failed write has no valid expected record.
+      v = 0;
+      for (int t = 0; t < 3000 * tscale && !v[28]; t++) apb_rd(A_IRQ_RAW, v);
+      chk(v[28], "P7: AXI write error interrupt set");
+      apb_wr(A_IRQ_RAW, 32'hFFFF_FFFF);
+      // An error response still advances WPTR; skip that slot before recovery.
+      rptr_sh[0]++;  // Skip the failed write slot.
+      apb_wr(A_RV(0, 8'h1C), rptr_sh[0]);
+      ring_cfg(0, 64'h0000_2000_0000, 64, 8, 1'b0, 1'b1, 1'b1);
+      feed(0, 1'b0); consume(0, rptr_sh[0] + 1);
+      $display("P7 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P8: Abort preserves pointers; resume after the host drains the ring.
-    apb_wr(A_RV(2, 8'h10), 32'h0);
-    apb_wr(A_RV(2, 8'h10), 32'h0103);  // Enable backpressure on channel 2.
-    cfg_settle();
-    for (int n = 0; n < 16; n++) feed(2, 1'b0);  // Fill the ring.
-    v = 0;
-    for (int t = 0; t < 3000 * tscale && v != rptr_sh[2] + 16; t++) apb_rd(A_RV(2, 8'h18), v);
-    chk(v == rptr_sh[2] + 16, "P8: ring is full before abort");
-    fork
-      begin : t_stuck
-        feed(2, 1'b0);  // Keep VALID asserted until the host releases space.
-      end
-      begin : t_srst
-        repeat (4) @(posedge maxi_clk);
-        apb_rd(A_RV(2, 8'h18), v); base_wp = v;
-        apb_wr(A_GLB_CTRL, 32'h1);
-        cfg_settle();
-        apb_rd(A_RV(2, 8'h18), v);
-        chk(v == base_wp, "P8: abort preserves WPTR");
-        chk(!lv_rx_tready[2], "P8: full ring remains backpressured after abort");
-        consume(2, rptr_sh[2] + 16);
-      end
-    join
-    consume(2, rptr_sh[2] + 1);  // Check the packet held across abort.
-    $display("P8 done (%0d checks, %0d errs)", checks, errs);
+    if (tj_run_case("P8")) begin
+      apb_wr(A_RV(2, 8'h10), 32'h0);
+      apb_wr(A_RV(2, 8'h10), 32'h0103);  // Enable backpressure on channel 2.
+      cfg_settle();
+      for (int n = 0; n < 16; n++) feed(2, 1'b0);  // Fill the ring.
+      v = 0;
+      for (int t = 0; t < 3000 * tscale && v != rptr_sh[2] + 16; t++) apb_rd(A_RV(2, 8'h18), v);
+      chk(v == rptr_sh[2] + 16, "P8: ring is full before abort");
+      fork
+        begin : t_stuck
+          feed(2, 1'b0);  // Keep VALID asserted until the host releases space.
+        end
+        begin : t_srst
+          repeat (4) @(posedge maxi_clk);
+          apb_rd(A_RV(2, 8'h18), v); base_wp = v;
+          apb_wr(A_GLB_CTRL, 32'h1);
+          cfg_settle();
+          apb_rd(A_RV(2, 8'h18), v);
+          chk(v == base_wp, "P8: abort preserves WPTR");
+          chk(!lv_rx_tready[2], "P8: full ring remains backpressured after abort");
+          consume(2, rptr_sh[2] + 16);
+        end
+      join
+      consume(2, rptr_sh[2] + 1);  // Check the packet held across abort.
+      $display("P8 done (%0d checks, %0d errs)", checks, errs);
+    end
 
     // P9: SEND-to-RECV loopback with concurrent AXI reads and writes.
-    // Any channel may receive all 30 records before host consumption starts.
-    ring_cfg(2, 64'h0000_2200_0000, 32, 4, 1'b1, 1'b1, 1'b0);
-    apb_wr(A_LNK_EN, 32'h007);
-    loop_en = 1;
-    loopback_writes = wr_land_cnt;
-    recs.delete();
-    for (int i = 0; i < 30; i++) begin
-      automatic int c = $urandom_range(0, 2);
-      automatic gold_t g;
-      g.is_end = (i == 29); g.pkt = mk_pkt(g.is_end);
-      exp_q[c].push_back(g);
-      recs.push_back({16'(i), (i == 29) ? 8'h01 : 8'h00, 8'(c), g.pkt});
-    end
-    foreach (recs[i]) ddr[(64'h0000_3000_0000 >> 4) + i] = recs[i];
-    apb_wr(A_S_SRCLO, 32'h3000_0000); apb_wr(A_S_SRCHI, 32'h0);
-    apb_wr(A_S_CNT, 30); apb_wr(A_S_DB, 32'h1);
-    v = 0;
-    for (int t = 0; t < 5000 * tscale && !v[8]; t++) apb_rd(A_S_STA, v);
-    chk(v[8], "P9: SEND DONE");
-    apb_wr(A_S_STA, 32'h300);
-    // Consume all expected records, allowing pending writes to finish.
-    for (int t = 0; t < 200 * tscale &&
-         (exp_q[0].size() || exp_q[1].size() || exp_q[2].size()); t++) begin
-      logic [31:0] wp;
-      for (int c = 0; c < 3; c++) begin
-        apb_rd(A_RV(c, 8'h18), wp);
-        consume(c, wp);
+    if (tj_run_case("P9")) begin
+      // Any channel may receive all 30 records before host consumption starts.
+      ring_cfg(2, 64'h0000_2200_0000, 32, 4, 1'b1, 1'b1, 1'b0);
+      apb_wr(A_LNK_EN, 32'h007);
+      loop_en = 1;
+      loopback_writes = wr_land_cnt;
+      recs.delete();
+      for (int i = 0; i < 30; i++) begin
+        automatic int c = $urandom_range(0, 2);
+        automatic gold_t g;
+        g.is_end = (i == 29); g.pkt = mk_pkt(g.is_end);
+        exp_q[c].push_back(g);
+        recs.push_back({16'(i), (i == 29) ? 8'h01 : 8'h00, 8'(c), g.pkt});
       end
-      #200ns;
+      foreach (recs[i]) ddr[(64'h0000_3000_0000 >> 4) + i] = recs[i];
+      apb_wr(A_S_SRCLO, 32'h3000_0000); apb_wr(A_S_SRCHI, 32'h0);
+      apb_wr(A_S_CNT, 30); apb_wr(A_S_DB, 32'h1);
+      v = 0;
+      for (int t = 0; t < 5000 * tscale && !v[8]; t++) apb_rd(A_S_STA, v);
+      chk(v[8], "P9: SEND DONE");
+      apb_wr(A_S_STA, 32'h300);
+      // Consume all expected records, allowing pending writes to finish.
+      for (int t = 0; t < 200 * tscale &&
+           (exp_q[0].size() || exp_q[1].size() || exp_q[2].size()); t++) begin
+        logic [31:0] wp;
+        for (int c = 0; c < 3; c++) begin
+          apb_rd(A_RV(c, 8'h18), wp);
+          consume(c, wp);
+        end
+        #200ns;
+      end
+      chk(exp_q[0].size() == 0 && exp_q[1].size() == 0 && exp_q[2].size() == 0,
+          "P9: all 30 loopback records checked");
+      cfg_settle();
+      chk(wr_land_cnt - loopback_writes == 30, "P9: exactly 30 loopback writes completed");
+      loop_en = 0;
+      $display("P9 done (%0d checks, %0d errs)", checks, errs);
     end
-    chk(exp_q[0].size() == 0 && exp_q[1].size() == 0 && exp_q[2].size() == 0,
-        "P9: all 30 loopback records checked");
-    cfg_settle();
-    chk(wr_land_cnt - loopback_writes == 30, "P9: exactly 30 loopback writes completed");
-    loop_en = 0;
-    $display("P9 done (%0d checks, %0d errs)", checks, errs);
 
     // P10: Check drain status and retained addresses during ring reconfiguration.
-    begin
-      logic [31:0] wp_b, wp_n, sta;
-      logic [95:0] pa, pb;
-      longint unsigned old_b, new_b, ia, ib;
-      old_b = 64'h0000_2070_0000; new_b = 64'h0000_2080_0000;
-      apb_wr(A_RV(0, 8'h10), 32'h0);
-      #2us;
-      apb_rd(A_RV(0, 8'h14), sta);
-      chk(sta[5], "P10: disabled and drained channel reports IDLE");
-      ring_cfg(0, old_b, 16, 8, 1'b1, 1'b0, 1'b0);
-      apb_rd(A_RV(0, 8'h18), wp_b);
-      apb_wr(A_RV(0, 8'h1C), wp_b); rptr_sh[0] = wp_b; exp_q[0].delete();
-      #2us;
-      apb_rd(A_RV(0, 8'h14), sta);
-      chk(!sta[5], "P10: enabled channel keeps IDLE low");
-      ia = (old_b >> 4) + longint'(wp_b & 32'd15);
-      ib = (old_b >> 4) + longint'((wp_b + 32'd1) & 32'd15);
+    if (tj_run_case("P10")) begin
+      begin
+        logic [31:0] wp_b, wp_n, sta;
+        logic [95:0] pa, pb;
+        longint unsigned old_b, new_b, ia, ib;
+        old_b = 64'h0000_2070_0000; new_b = 64'h0000_2080_0000;
+        apb_wr(A_RV(0, 8'h10), 32'h0);
+        #2us;
+        apb_rd(A_RV(0, 8'h14), sta);
+        chk(sta[5], "P10: disabled and drained channel reports IDLE");
+        ring_cfg(0, old_b, 16, 8, 1'b1, 1'b0, 1'b0);
+        apb_rd(A_RV(0, 8'h18), wp_b);
+        apb_wr(A_RV(0, 8'h1C), wp_b); rptr_sh[0] = wp_b; exp_q[0].delete();
+        #2us;
+        apb_rd(A_RV(0, 8'h14), sta);
+        chk(!sta[5], "P10: enabled channel keeps IDLE low");
+        ia = (old_b >> 4) + longint'(wp_b & 32'd15);
+        ib = (old_b >> 4) + longint'((wp_b + 32'd1) & 32'd15);
 
-      b_hold = 1'b1;
-      pa = mk_pkt(1'b0); pb = mk_pkt(1'b0);
-      send_rx(0, pa);
-      send_rx(0, pb);
-      repeat (8) @(posedge maxi_clk);
-      apb_wr(A_RV(0, 8'h10), 32'h2);
-      #2us;
-      apb_rd(A_RV(0, 8'h14), sta);
-      chk(!sta[5], "P10: pending records keep IDLE low");
-      // Change BASE early only to test buffered-address retention.
-      // Host software must wait for IDLE before changing ring parameters.
-      apb_wr(A_RV(0, 8'h00), new_b[31:0]);
-      #2us;
-      b_hold = 1'b0;
-      sta = 0;
-      for (int t = 0; t < 3000 * tscale && !sta[5]; t++) apb_rd(A_RV(0, 8'h14), sta);
-      chk(sta[5], "P10: IDLE asserts after draining");
-      apb_rd(A_RV(0, 8'h18), wp_n);
-      chk(wp_n == wp_b + 2, $sformatf("P10: both records completed (WPTR +%0d)", wp_n - wp_b));
-      chk(ddr.exists(ia) && ddr[ia][95:0] === pa, "P10: packet A is stored in the old ring");
-      chk(ddr.exists(ib) && ddr[ib][95:0] === pb, "P10: buffered packet B retains its old-ring address");
-      chk(!ddr.exists((new_b >> 4) + longint'((wp_b + 32'd1) & 32'd15)),
-          "P10: old packets do not write the new ring");
-      ring_cfg(0, new_b, 16, 8, 1'b0, 1'b0, 1'b0);
-      rptr_sh[0] = wp_n; apb_wr(A_RV(0, 8'h1C), wp_n);
-      #2us;
-      feed(0, 1'b0); consume(0, rptr_sh[0] + 1);
-      chk(exp_q[0].size() == 0, "P10: reception resumes on the new ring");
+        b_hold = 1'b1;
+        pa = mk_pkt(1'b0); pb = mk_pkt(1'b0);
+        send_rx(0, pa);
+        send_rx(0, pb);
+        repeat (8) @(posedge maxi_clk);
+        apb_wr(A_RV(0, 8'h10), 32'h2);
+        #2us;
+        apb_rd(A_RV(0, 8'h14), sta);
+        chk(!sta[5], "P10: pending records keep IDLE low");
+        // Change BASE early only to test buffered-address retention.
+        // Host software must wait for IDLE before changing ring parameters.
+        apb_wr(A_RV(0, 8'h00), new_b[31:0]);
+        #2us;
+        b_hold = 1'b0;
+        sta = 0;
+        for (int t = 0; t < 3000 * tscale && !sta[5]; t++) apb_rd(A_RV(0, 8'h14), sta);
+        chk(sta[5], "P10: IDLE asserts after draining");
+        apb_rd(A_RV(0, 8'h18), wp_n);
+        chk(wp_n == wp_b + 2, $sformatf("P10: both records completed (WPTR +%0d)", wp_n - wp_b));
+        chk(ddr.exists(ia) && ddr[ia][95:0] === pa, "P10: packet A is stored in the old ring");
+        chk(ddr.exists(ib) && ddr[ib][95:0] === pb, "P10: buffered packet B retains its old-ring address");
+        chk(!ddr.exists((new_b >> 4) + longint'((wp_b + 32'd1) & 32'd15)),
+            "P10: old packets do not write the new ring");
+        ring_cfg(0, new_b, 16, 8, 1'b0, 1'b0, 1'b0);
+        rptr_sh[0] = wp_n; apb_wr(A_RV(0, 8'h1C), wp_n);
+        #2us;
+        feed(0, 1'b0); consume(0, rptr_sh[0] + 1);
+        chk(exp_q[0].size() == 0, "P10: reception resumes on the new ring");
+      end
+      $display("P10 done (%0d checks, %0d errs)", checks, errs);
     end
-    $display("P10 done (%0d checks, %0d errs)", checks, errs);
 
     // P11: Short enable windows and back-to-back ring configuration.
-    begin
-      logic [31:0] wp_claim, wp_late, wp0, sta;
-      int unsigned n_took = 0;
-      longint unsigned rb [2] = '{64'h0000_20D0_0000, 64'h0000_20E0_0000};
-      int unsigned     rs [2] = '{16, 4};
-      apb_wr(A_RV(0, 8'h10), 32'h0);
-      #2us;
-      apb_wr(A_RV(0, 8'h04), 32'h0);
-      apb_wr(A_RV(0, 8'h0C), 32'd8);
-      for (int w = 0; w <= 40; w++) begin
-        automatic int x = w % 2;
-        sta = 0;
-        for (int t = 0; t < 3000 * tscale && !sta[5]; t++) apb_rd(A_RV(0, 8'h14), sta);
-        chk(sta[5], $sformatf("P11[w=%0d]: channel is initially idle", w));
-        apb_rd(A_RV(0, 8'h18), wp0);
-        apb_wr(A_RV(0, 8'h1C), wp0);
-        repeat (8) @(posedge maxi_clk);
-        stream_port = 0; stream_on = 1'b1;
-        repeat (6) @(posedge maxi_clk);
-        land_a.delete();
-        ring_base[0] = rb[x]; ring_size[0] = rs[x];
-        repeat ($urandom_range(0, 7)) @(posedge pclk);
-        if ((w / 2) % 2 == 0) begin
-          apb_wr(A_RV(0, 8'h00), rb[x][31:0]);
-          apb_wr(A_RV(0, 8'h08), rs[x]);
-        end else begin
-          apb_wr(A_RV(0, 8'h08), rs[x]);
-          apb_wr(A_RV(0, 8'h00), rb[x][31:0]);
-        end
-        apb_wr(A_RV(0, 8'h10), 32'h1);
-        repeat (w) @(posedge pclk);
+    if (tj_run_case("P11")) begin
+      begin
+        logic [31:0] wp_claim, wp_late, wp0, sta;
+        int unsigned n_took = 0;
+        longint unsigned rb [2] = '{64'h0000_20D0_0000, 64'h0000_20E0_0000};
+        int unsigned     rs [2] = '{16, 4};
         apb_wr(A_RV(0, 8'h10), 32'h0);
-        sta = 0;
-        for (int t = 0; t < 3000 * tscale && !sta[5]; t++) apb_rd(A_RV(0, 8'h14), sta);
-        chk(sta[5], $sformatf("P11[w=%0d]: IDLE asserts after draining", w));
-        apb_rd(A_RV(0, 8'h18), wp_claim);
-        stream_on = 1'b0;
-        repeat (400) @(posedge maxi_clk);
-        repeat (8) @(posedge pclk);
-        apb_rd(A_RV(0, 8'h18), wp_late);
-        chk(wp_late == wp_claim,
-            $sformatf("P11[w=%0d]: WPTR changed after IDLE (%0d -> %0d)", w, wp_claim, wp_late));
+        #2us;
+        apb_wr(A_RV(0, 8'h04), 32'h0);
+        apb_wr(A_RV(0, 8'h0C), 32'd8);
+        for (int w = 0; w <= 40; w++) begin
+          automatic int x = w % 2;
+          sta = 0;
+          for (int t = 0; t < 3000 * tscale && !sta[5]; t++) apb_rd(A_RV(0, 8'h14), sta);
+          chk(sta[5], $sformatf("P11[w=%0d]: channel is initially idle", w));
+          apb_rd(A_RV(0, 8'h18), wp0);
+          apb_wr(A_RV(0, 8'h1C), wp0);
+          repeat (8) @(posedge maxi_clk);
+          stream_port = 0; stream_on = 1'b1;
+          repeat (6) @(posedge maxi_clk);
+          land_a.delete();
+          ring_base[0] = rb[x]; ring_size[0] = rs[x];
+          repeat ($urandom_range(0, 7)) @(posedge pclk);
+          if ((w / 2) % 2 == 0) begin
+            apb_wr(A_RV(0, 8'h00), rb[x][31:0]);
+            apb_wr(A_RV(0, 8'h08), rs[x]);
+          end else begin
+            apb_wr(A_RV(0, 8'h08), rs[x]);
+            apb_wr(A_RV(0, 8'h00), rb[x][31:0]);
+          end
+          apb_wr(A_RV(0, 8'h10), 32'h1);
+          repeat (w) @(posedge pclk);
+          apb_wr(A_RV(0, 8'h10), 32'h0);
+          sta = 0;
+          for (int t = 0; t < 3000 * tscale && !sta[5]; t++) apb_rd(A_RV(0, 8'h14), sta);
+          chk(sta[5], $sformatf("P11[w=%0d]: IDLE asserts after draining", w));
+          apb_rd(A_RV(0, 8'h18), wp_claim);
+          stream_on = 1'b0;
+          repeat (400) @(posedge maxi_clk);
+          repeat (8) @(posedge pclk);
+          apb_rd(A_RV(0, 8'h18), wp_late);
+          chk(wp_late == wp_claim,
+              $sformatf("P11[w=%0d]: WPTR changed after IDLE (%0d -> %0d)", w, wp_claim, wp_late));
+          apb_rd(A_RV(0, 8'h14), sta);
+          chk(sta[5], $sformatf("P11[w=%0d]: IDLE remains asserted", w));
+          chk(land_a.size() == wp_late - wp0,
+              $sformatf("P11[w=%0d]: completed writes %0d differ from WPTR increment %0d", w, land_a.size(), wp_late - wp0));
+          foreach (land_a[i])
+            chk(land_a[i] == rb[x][47:0] + (48'((wp0 + 32'(i)) & (rs[x] - 1)) << 4),
+                $sformatf("P11[w=%0d]: write %0d at %012h, expected ring %012h slot %0d",
+                          w, i, land_a[i], rb[x][47:0], (wp0 + 32'(i)) & (rs[x] - 1)));
+          if (wp_late != wp0) n_took++;
+          rptr_sh[0] = wp_late;
+        end
+        chk(n_took > 0, "P11: at least one enable window received records");
+        apb_wr(A_RV(0, 8'h1C), rptr_sh[0]);
+        apb_wr(A_RV(0, 8'h10), 32'h1);
         apb_rd(A_RV(0, 8'h14), sta);
-        chk(sta[5], $sformatf("P11[w=%0d]: IDLE remains asserted", w));
-        chk(land_a.size() == wp_late - wp0,
-            $sformatf("P11[w=%0d]: completed writes %0d differ from WPTR increment %0d", w, land_a.size(), wp_late - wp0));
-        foreach (land_a[i])
-          chk(land_a[i] == rb[x][47:0] + (48'((wp0 + 32'(i)) & (rs[x] - 1)) << 4),
-              $sformatf("P11[w=%0d]: write %0d at %012h, expected ring %012h slot %0d",
-                        w, i, land_a[i], rb[x][47:0], (wp0 + 32'(i)) & (rs[x] - 1)));
-        if (wp_late != wp0) n_took++;
-        rptr_sh[0] = wp_late;
+        chk(!sta[5], "P11: IDLE is low after writing EN=1");
+        cfg_settle();
+        exp_q[0].delete();
+        feed(0, 1'b0); consume(0, rptr_sh[0] + 1);
+        chk(exp_q[0].size() == 0, "P11: reception resumes after the enable-window sweep");
       end
-      chk(n_took > 0, "P11: at least one enable window received records");
-      apb_wr(A_RV(0, 8'h1C), rptr_sh[0]);
-      apb_wr(A_RV(0, 8'h10), 32'h1);
-      apb_rd(A_RV(0, 8'h14), sta);
-      chk(!sta[5], "P11: IDLE is low after writing EN=1");
-      cfg_settle();
-      exp_q[0].delete();
-      feed(0, 1'b0); consume(0, rptr_sh[0] + 1);
-      chk(exp_q[0].size() == 0, "P11: reception resumes after the enable-window sweep");
+      $display("P11 done (%0d checks, %0d errs)", checks, errs);
     end
-    $display("P11 done (%0d checks, %0d errs)", checks, errs);
 
     if (errs != 0 || checks == 0) $fatal(1, "RECV TB FAIL (%0d/%0d)", errs, checks);
     $display("RECV TB PASS (%0d checks)", checks);

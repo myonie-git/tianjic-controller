@@ -24,6 +24,17 @@ python3 controller/tb/recv/run_recv_tb.py --top /path/to/tj_ctrl_top.sv \
   --work /tmp/tj_recv_main_1 --seed 1 --seed 2
 ```
 
+Select comprehensive-test scenes without running earlier scenes:
+
+~~~sh
+python3 controller/tb/recv/run_recv_tb.py --cases P10,P11 \
+  --work /tmp/tj_recv_selected --seed 1
+~~~
+
+With no --cases, the original sequence is retained. Focused testbenches are selected
+as a whole using --testbench. Direct simulator runs accept +TJ_CASES=P10,P11.
+Manual compilation of the comprehensive test needs +incdir+<controller>/tb/common.
+
 Select a focused test with `--testbench`, for example:
 
 ```sh
