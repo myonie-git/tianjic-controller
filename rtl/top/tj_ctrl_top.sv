@@ -176,6 +176,7 @@ module tj_ctrl_top
   logic                  recv_axi_werr_w;
   logic [N_CH-1:0][31:0] recv_wptr_w;
   logic [N_CH-1:0][15:0] recv_level_w;
+  logic [N_CH-1:0]       recv_idle_w;
   logic                  mwr_valid, mwr_ready, mwr_done, mwr_idle, mwr_err;
   logic [AXI_AW-1:0]     mwr_addr;
   logic [127:0]          mwr_data;
@@ -289,6 +290,7 @@ module tj_ctrl_top
     hwi.recv_sta_endpkt_set  = recv_end_set_w;
     hwi.recv_sta_ovf_set     = recv_ovf_set_w;
     hwi.recv_sta_level       = recv_level_w;
+    hwi.recv_sta_idle        = recv_idle_w;
     hwi.recv_wptr            = recv_wptr_w;
 
     hwi.irq_raw_set[7:0]     = spi_done_w;
@@ -335,7 +337,7 @@ module tj_ctrl_top
     .csr_en     (hwo.recv_ctrl_en), .csr_pol    (hwo.recv_ctrl_ovf_policy),
     .csr_remap0 (hwo.lnk_remap0),   .csr_remap1 (hwo.lnk_remap1),
     .csr_rptr   (hwo.recv_rptr),
-    .sta_wptr(recv_wptr_w), .sta_level(recv_level_w),
+    .sta_wptr(recv_wptr_w), .sta_level(recv_level_w), .sta_idle(recv_idle_w),
     .set_wmark(recv_wmark_set_w), .set_end(recv_end_set_w),
     .set_ovf(recv_ovf_set_w), .set_axi_werr(recv_axi_werr_w),
     .maxi_clk, .maxi_rstn, .ts(ts_q),

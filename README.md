@@ -65,7 +65,8 @@ SEND 表起始地址要求64字节对齐。RECV 按通道写入环形缓冲，Ho
 | Synopsys DC / PrimeTime | `tj_ctrl.sdc` | `tj_<组名>.sdc` |
 | Vivado | `tj_ctrl_vivado.xdc` | `tj_<组名>_vivado.xdc` |
 
-SEND 启动配置的延迟上界目前仅在 Quartus 版实现，预算为一个 `maxi_clk` 周期。
+SEND 启动配置、RECV 环参数及使能的延迟上界目前仅在 Quartus 版实现，
+从 pclk 寄存器到同步器首级的预算为一个 `maxi_clk` 周期。
 
 - Synopsys DC 需先设置下表的周期变量，再用 Tcl `source` 逐份加载。直接使用 `read_sdc` 会报错。PrimeTime 尚未验证。
 - Vivado 已验证两级同步器的 `ASYNC_REG` 标记。BOOT 时序约束的对象查询还会选中 `CARRY4`，`blk_err` 的 CDC 报告仍待复核。
@@ -129,6 +130,11 @@ BOOT 测例 [tb_tj_boot.sv](tb/boot/tb_tj_boot.sv) 通过 die 0 的 `spi2ahb` �
 回归的 BOOT 阶段共用一次编译，按三组 `pclk/maxi_clk` 频率运行（MHz）：100/416.7、250/50、10/100。
 芯片模型的 AHB 时钟固定为 100 MHz。
 旁路 SPI 通过上述回归入口运行，覆盖开启和关闭两种配置。另用 `tb_tj_bypass_csr.sv` 连接生成的 `tj_ctrl_csr`，检查寄存器读写、W1C、只读寄存器和未映射地址响应。
+RECV换环可用于软件双缓冲交替、调整缓冲容量和切换接收任务。Host先暂停该通道输入，
+写EN=0并等待STA.IDLE=1，记录旧环最终WPTR，再按环参数和RPTR的同步约定准备新环、恢复接收。
+旧环数据可由Host另行处理，处理完成后再回收旧内存。EN=0期间仍到达的新包会被丢弃；
+缓冲区分配和切换由Host控制，不自动交换缓冲区。
+EN同步到接收域后再延迟2拍启用；配置时先写环参数，再使能。
 专项测试及其时钟、抖动配置使用各自入口：
 
 | 测试 | 说明 |

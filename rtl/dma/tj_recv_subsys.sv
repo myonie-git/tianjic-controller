@@ -24,6 +24,7 @@ module tj_recv_subsys
   input  logic [N_CH-1:0][31:0]    csr_rptr,
   output logic [N_CH-1:0][31:0]    sta_wptr,
   output logic [N_CH-1:0][15:0]    sta_level,
+  output logic [N_CH-1:0]          sta_idle,
   output logic [N_CH-1:0]          set_wmark,  // Watermark event.
   output logic [N_CH-1:0]          set_end,  // END event.
   output logic [N_CH-1:0]          set_ovf,  // Dropped-packet event.
@@ -71,6 +72,18 @@ module tj_recv_subsys
     );
   end
 
+  // Delay enable assertion by two cycles; deassertion follows en_syn.
+  logic [N_CH-1:0] en_d1_q, en_d2_q, en_eff;
+  always_ff @(posedge maxi_clk or negedge maxi_rstn)
+    if (!maxi_rstn) begin
+      en_d1_q <= '0;
+      en_d2_q <= '0;
+    end else begin
+      en_d1_q <= en_syn;
+      en_d2_q <= en_d1_q;
+    end
+  assign en_eff = en_syn & en_d1_q & en_d2_q;
+
   // Keep remapping stable while receiving.
   logic [31:0] remap0_syn;
   logic [15:0] remap1_syn;
@@ -86,14 +99,14 @@ module tj_recv_subsys
   // Receive engine.
 
   logic [N_CH-1:0][31:0] wptr_w;
-  logic [N_CH-1:0]       evw_w, eve_w, evo_w;
+  logic [N_CH-1:0]       evw_w, eve_w, evo_w, idle_w;
 
   tj_recv_engine #(.N_CH(N_CH), .N_PORTS(N_PORTS), .AW(AW)) u_engine (
     .clk(maxi_clk), .rst_n(maxi_rstn), .abort(srst_maxi), .ts(ts),
     .cfg_base(base_syn), .cfg_size(size_syn), .cfg_wmark(wmark_syn),
-    .cfg_en(en_syn), .cfg_pol(pol_syn), .rptr(rptr_syn),
+    .cfg_en(en_eff), .cfg_pol(pol_syn), .rptr(rptr_syn),
     .cfg_remap0(remap0_syn), .cfg_remap1(remap1_syn),
-    .wptr(wptr_w), .level(),
+    .wptr(wptr_w), .level(), .idle(idle_w),
     .evt_wmark(evw_w), .evt_end(eve_w), .evt_ovf(evo_w),
     .rx_tvalid, .rx_tready, .rx_tdata,
     .wr_valid, .wr_ready, .wr_addr, .wr_data, .wr_done, .wr_idle
@@ -102,10 +115,21 @@ module tj_recv_subsys
   // WPTR snapshots and ring occupancy in pclk.
 
   for (genvar c = 0; c < N_CH; c++) begin : g_sta_syn
-    tj_snap_sync #(.W(32)) u_wp (
-      .sclk(maxi_clk), .srst_n(maxi_rstn), .d(wptr_w[c]),
-      .dclk(pclk), .drst_n(presetn), .q(sta_wptr[c])
+    logic [32:0] snap_w;
+    logic upd_w;
+    tj_snap_sync #(.W(33)) u_wp (
+      .sclk(maxi_clk), .srst_n(maxi_rstn), .d({idle_w[c], wptr_w[c]}),
+      .dclk(pclk), .drst_n(presetn), .q(snap_w), .upd(upd_w)
     );
+    assign sta_wptr[c] = snap_w[31:0];
+
+    // Discard snapshots that may predate the latest disable request.
+    logic [1:0] fresh_q;
+    always_ff @(posedge pclk or negedge presetn)
+      if (!presetn) fresh_q <= '0;
+      else if (csr_en[c]) fresh_q <= '0;
+      else if (upd_w && fresh_q != 2'd3) fresh_q <= fresh_q + 2'd1;
+    assign sta_idle[c] = snap_w[32] && !csr_en[c] && (fresh_q == 2'd3);
     assign sta_level[c] = 16'(sta_wptr[c] - csr_rptr[c]);
   end
 

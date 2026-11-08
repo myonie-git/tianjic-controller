@@ -379,7 +379,7 @@ blocks:
       - name: RING_LO
         offset: 0x00
         kind: RW
-        desc: "DDR 环形缓冲基址[31:0]，64B对齐；仅EN=0时修改，重新使能前等待配置跨域稳定。写地址在收包时锁存，关闭通道不会取消已收记录；回收旧缓冲区前仍须确认旧写已结束。"
+        desc: "DDR环形缓冲基址[31:0]，须64B对齐。用于软件双缓冲切换、容量调整或任务切换；先暂停该通道输入，写EN=0并等待STA.IDLE=1后修改。已收记录仍按锁存地址写入旧环。"
 
       - name: RING_HI
         offset: 0x04
@@ -390,12 +390,12 @@ blocks:
       - name: SIZE
         offset: 0x08
         kind: RW
-        desc: "环容量，单位为记录条数，须为2的幂；仅EN=0时修改。修改不改变已缓冲记录的写地址；重新使能前等待配置跨域稳定。"
+        desc: "环容量，单位为记录条数，须为2的幂；仅EN=0且STA.IDLE=1时修改。"
 
       - name: WMARK
         offset: 0x0C
         kind: RW
-        desc: "水线阈值(落地记录数自下而上越过阈值时打事件沿);仅 EN=0 时修改"
+        desc: "未消费记录数向上跨过该阈值时产生水线事件；仅EN=0且STA.IDLE=1时修改。"
 
       - name: CTRL
         offset: 0x10
@@ -404,7 +404,7 @@ blocks:
           - name: EN
             bits: 0
             kind: RW
-            desc: "通道使能(0=丢弃入包)"
+            desc: "通道使能；0表示接收后丢弃新包，不取消已收记录。先写环参数，再写EN=1；同步到maxi_clk后再延迟2拍启用，此前到达的包按关闭处理。写0经同步后停收。"
 
           - name: OVF_POLICY
             bits: 1
@@ -439,6 +439,11 @@ blocks:
             bits: 2
             kind: W1C
             desc: "已使能通道在环满或软中止排空期间按策略0丢弃了新包；写1清除。"
+
+          - name: IDLE
+            bits: 5
+            kind: RO
+            desc: "引擎已看到EN=0，且该通道没有缓冲或在途记录，与WPTR来自同一快照。EN=1时恒为0；EN从1清0后，等待3次快照刷新才允许置1。软件等本位为1后再读取最终WPTR或更换环参数；写入是否成功仍需检查AXI错误状态。"
 
           - name: LEVEL
             bits: "31:16"

@@ -12,6 +12,14 @@ foreach tj_send_sync {u_src_syn u_cnt_syn u_en_syn u_rm0_syn u_rm1_syn} {
 }
 unset tj_send_sync
 
+# Bound RECV configuration before reception is enabled.
+foreach tj_recv_sync {u_base u_size u_wmk u_en u_pol u_remap0} {
+    set_data_delay -from [get_clocks pclk] \
+        -to [get_registers "*u_recv*|*${tj_recv_sync}*|meta_q*"] \
+        -get_value_from_clock_period dst_clock_period -value_multiplier 1.0
+}
+unset tj_recv_sync
+
 set_false_path -from [get_keepers {*|tgl_q*}] -to [get_keepers {*|syn_q[0]}]
 set_false_path -from [get_keepers {*|tgl_q*}] -to [get_keepers {*|s0_q*}]
 set_false_path -from [get_keepers {*u_boot*|*u_fetch*|ack_tgl}] \

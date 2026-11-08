@@ -28,6 +28,7 @@ module tj_recv_engine
   output logic [N_CH-1:0]          evt_wmark,  // Watermark upward-crossing pulse.
   output logic [N_CH-1:0]          evt_end,  // END-tagged write-response pulse.
   output logic [N_CH-1:0]          evt_ovf,  // Full-ring or abort-drain drop pulse.
+  output logic [N_CH-1:0]          idle,  // Disabled, with no buffered or outstanding record.
   // LVDS ports, ordered by instance and port within the instance.
   input  logic [N_PORTS-1:0]       rx_tvalid,
   output logic [N_PORTS-1:0]       rx_tready,
@@ -192,6 +193,17 @@ module tj_recv_engine
       end
     end
   end
+
+  // Drain status for software double buffering, ring resizing, and task changes.
+  // Pause incoming traffic while reception is disabled.
+  logic [N_CH-1:0] idle_q;
+  always_ff @(posedge clk or negedge rst_n)
+    if (!rst_n) idle_q <= '0;
+    else
+      for (int c = 0; c < N_CH; c++)
+        idle_q[c] <= !cfg_en[c] && !buf_v_q[c]
+                     && !(inf_v_q && (32'(inf_ch_q) == c));
+  assign idle = idle_q;
 
   assign wptr = wd_q;
   always_comb

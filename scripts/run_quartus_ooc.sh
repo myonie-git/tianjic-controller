@@ -96,6 +96,10 @@ foreach inst {u_src_syn u_cnt_syn u_en_syn u_rm0_syn u_rm1_syn} {
     show_paths $inst [get_timing_paths -data_delay -from_clock [get_clocks pclk] \
         -to [get_registers "*u_send*|*${inst}*|meta_q*"] -npaths 2]
 }
+foreach inst {u_base u_size u_wmk u_en u_pol u_remap0} {
+    show_paths "RECV/$inst" [get_timing_paths -data_delay -from_clock [get_clocks pclk] \
+        -to [get_registers "*u_recv*|*${inst}*|meta_q*"] -npaths 2]
+}
 delete_timing_netlist
 project_close
 TCL

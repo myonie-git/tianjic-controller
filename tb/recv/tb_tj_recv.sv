@@ -130,6 +130,8 @@ module tb_tj_recv;
   logic [127:0] wq[$];
   int aw_stall, w_stall;
   int unsigned wr_land_cnt;  // Successful write count.
+  logic [47:0] land_a[$];
+  bit b_hold = 0;
   int unsigned wr_rsp_count[3];  // Completed AXI responses per ring, including errors.
   always @(posedge maxi_clk) begin
     aw_stall <= $urandom_range(0, 9);
@@ -158,9 +160,11 @@ module tb_tj_recv;
         automatic aw_t a = awq.pop_front();
         automatic logic [127:0] d = wq.pop_front();
         repeat ($urandom_range(1, 8)) @(posedge maxi_clk);  // Delay the B response.
+        while (b_hold) @(posedge maxi_clk);
         if (!a.addr[40]) begin
           ddr[a.addr >> 4] = d;
           wr_land_cnt++;
+          land_a.push_back(a.addr);
         end
         bvalid <= 1; bresp <= a.addr[40] ? 2'b10 : 2'b00; bid <= a.id;
         @(posedge maxi_clk);
@@ -195,6 +199,20 @@ module tb_tj_recv;
     drv_v[p] <= 1'b0;
     repeat ($urandom_range(0, 2)) @(posedge maxi_clk);
   endtask
+
+  // Continuous packet stimulus for short enable windows.
+  bit stream_on = 0;
+  int stream_port = 0;
+  initial forever begin
+    @(posedge maxi_clk);
+    if (stream_on) begin
+      drv_d[stream_port] <= mk_pkt(1'b0);
+      drv_v[stream_port] <= 1'b1;
+      @(posedge maxi_clk);
+      while (stream_on && !lv_rx_tready[stream_port]) @(posedge maxi_clk);
+      drv_v[stream_port] <= 1'b0;
+    end
+  end
 
   // Host APB transactions.
 
@@ -524,6 +542,122 @@ module tb_tj_recv;
     chk(wr_land_cnt - loopback_writes == 30, "P9: exactly 30 loopback writes completed");
     loop_en = 0;
     $display("P9 done (%0d checks, %0d errs)", checks, errs);
+
+    // P10: Check drain status and retained addresses during ring reconfiguration.
+    begin
+      logic [31:0] wp_b, wp_n, sta;
+      logic [95:0] pa, pb;
+      longint unsigned old_b, new_b, ia, ib;
+      old_b = 64'h0000_2070_0000; new_b = 64'h0000_2080_0000;
+      apb_wr(A_RV(0, 8'h10), 32'h0);
+      #2us;
+      apb_rd(A_RV(0, 8'h14), sta);
+      chk(sta[5], "P10: disabled and drained channel reports IDLE");
+      ring_cfg(0, old_b, 16, 8, 1'b1, 1'b0, 1'b0);
+      apb_rd(A_RV(0, 8'h18), wp_b);
+      apb_wr(A_RV(0, 8'h1C), wp_b); rptr_sh[0] = wp_b; exp_q[0].delete();
+      #2us;
+      apb_rd(A_RV(0, 8'h14), sta);
+      chk(!sta[5], "P10: enabled channel keeps IDLE low");
+      ia = (old_b >> 4) + longint'(wp_b & 32'd15);
+      ib = (old_b >> 4) + longint'((wp_b + 32'd1) & 32'd15);
+
+      b_hold = 1'b1;
+      pa = mk_pkt(1'b0); pb = mk_pkt(1'b0);
+      send_rx(0, pa);
+      send_rx(0, pb);
+      repeat (8) @(posedge maxi_clk);
+      apb_wr(A_RV(0, 8'h10), 32'h2);
+      #2us;
+      apb_rd(A_RV(0, 8'h14), sta);
+      chk(!sta[5], "P10: pending records keep IDLE low");
+      // Change BASE early only to test buffered-address retention.
+      // Host software must wait for IDLE before changing ring parameters.
+      apb_wr(A_RV(0, 8'h00), new_b[31:0]);
+      #2us;
+      b_hold = 1'b0;
+      sta = 0;
+      for (int t = 0; t < 3000 * tscale && !sta[5]; t++) apb_rd(A_RV(0, 8'h14), sta);
+      chk(sta[5], "P10: IDLE asserts after draining");
+      apb_rd(A_RV(0, 8'h18), wp_n);
+      chk(wp_n == wp_b + 2, $sformatf("P10: both records completed (WPTR +%0d)", wp_n - wp_b));
+      chk(ddr.exists(ia) && ddr[ia][95:0] === pa, "P10: packet A is stored in the old ring");
+      chk(ddr.exists(ib) && ddr[ib][95:0] === pb, "P10: buffered packet B retains its old-ring address");
+      chk(!ddr.exists((new_b >> 4) + longint'((wp_b + 32'd1) & 32'd15)),
+          "P10: old packets do not write the new ring");
+      ring_cfg(0, new_b, 16, 8, 1'b0, 1'b0, 1'b0);
+      rptr_sh[0] = wp_n; apb_wr(A_RV(0, 8'h1C), wp_n);
+      #2us;
+      feed(0, 1'b0); consume(0, rptr_sh[0] + 1);
+      chk(exp_q[0].size() == 0, "P10: reception resumes on the new ring");
+    end
+    $display("P10 done (%0d checks, %0d errs)", checks, errs);
+
+    // P11: Short enable windows and back-to-back ring configuration.
+    begin
+      logic [31:0] wp_claim, wp_late, wp0, sta;
+      int unsigned n_took = 0;
+      longint unsigned rb [2] = '{64'h0000_20D0_0000, 64'h0000_20E0_0000};
+      int unsigned     rs [2] = '{16, 4};
+      apb_wr(A_RV(0, 8'h10), 32'h0);
+      #2us;
+      apb_wr(A_RV(0, 8'h04), 32'h0);
+      apb_wr(A_RV(0, 8'h0C), 32'd8);
+      for (int w = 0; w <= 40; w++) begin
+        automatic int x = w % 2;
+        sta = 0;
+        for (int t = 0; t < 3000 * tscale && !sta[5]; t++) apb_rd(A_RV(0, 8'h14), sta);
+        chk(sta[5], $sformatf("P11[w=%0d]: channel is initially idle", w));
+        apb_rd(A_RV(0, 8'h18), wp0);
+        apb_wr(A_RV(0, 8'h1C), wp0);
+        repeat (8) @(posedge maxi_clk);
+        stream_port = 0; stream_on = 1'b1;
+        repeat (6) @(posedge maxi_clk);
+        land_a.delete();
+        ring_base[0] = rb[x]; ring_size[0] = rs[x];
+        repeat ($urandom_range(0, 7)) @(posedge pclk);
+        if ((w / 2) % 2 == 0) begin
+          apb_wr(A_RV(0, 8'h00), rb[x][31:0]);
+          apb_wr(A_RV(0, 8'h08), rs[x]);
+        end else begin
+          apb_wr(A_RV(0, 8'h08), rs[x]);
+          apb_wr(A_RV(0, 8'h00), rb[x][31:0]);
+        end
+        apb_wr(A_RV(0, 8'h10), 32'h1);
+        repeat (w) @(posedge pclk);
+        apb_wr(A_RV(0, 8'h10), 32'h0);
+        sta = 0;
+        for (int t = 0; t < 3000 * tscale && !sta[5]; t++) apb_rd(A_RV(0, 8'h14), sta);
+        chk(sta[5], $sformatf("P11[w=%0d]: IDLE asserts after draining", w));
+        apb_rd(A_RV(0, 8'h18), wp_claim);
+        stream_on = 1'b0;
+        repeat (400) @(posedge maxi_clk);
+        repeat (8) @(posedge pclk);
+        apb_rd(A_RV(0, 8'h18), wp_late);
+        chk(wp_late == wp_claim,
+            $sformatf("P11[w=%0d]: WPTR changed after IDLE (%0d -> %0d)", w, wp_claim, wp_late));
+        apb_rd(A_RV(0, 8'h14), sta);
+        chk(sta[5], $sformatf("P11[w=%0d]: IDLE remains asserted", w));
+        chk(land_a.size() == wp_late - wp0,
+            $sformatf("P11[w=%0d]: completed writes %0d differ from WPTR increment %0d", w, land_a.size(), wp_late - wp0));
+        foreach (land_a[i])
+          chk(land_a[i] == rb[x][47:0] + (48'((wp0 + 32'(i)) & (rs[x] - 1)) << 4),
+              $sformatf("P11[w=%0d]: write %0d at %012h, expected ring %012h slot %0d",
+                        w, i, land_a[i], rb[x][47:0], (wp0 + 32'(i)) & (rs[x] - 1)));
+        if (wp_late != wp0) n_took++;
+        rptr_sh[0] = wp_late;
+      end
+      chk(n_took > 0, "P11: at least one enable window received records");
+      apb_wr(A_RV(0, 8'h1C), rptr_sh[0]);
+      apb_wr(A_RV(0, 8'h10), 32'h1);
+      apb_rd(A_RV(0, 8'h14), sta);
+      chk(!sta[5], "P11: IDLE is low after writing EN=1");
+      cfg_settle();
+      exp_q[0].delete();
+      feed(0, 1'b0); consume(0, rptr_sh[0] + 1);
+      chk(exp_q[0].size() == 0, "P11: reception resumes after the enable-window sweep");
+    end
+    $display("P11 done (%0d checks, %0d errs)", checks, errs);
 
     if (errs != 0 || checks == 0) $fatal(1, "RECV TB FAIL (%0d/%0d)", errs, checks);
     $display("RECV TB PASS (%0d checks)", checks);

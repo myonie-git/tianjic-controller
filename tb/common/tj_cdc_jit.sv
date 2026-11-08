@@ -121,7 +121,8 @@ module tj_snap_sync #(
   input  logic [W-1:0] d,
   input  logic         dclk,
   input  logic         drst_n,
-  output logic [W-1:0] q
+  output logic [W-1:0] q,
+  output logic         upd  // Destination-domain snapshot update pulse.
 );
   logic         req_tog_q, ack_tog_q;
   logic         req_s, ack_d;
@@ -139,14 +140,21 @@ module tj_snap_sync #(
       ack_tog_q <= req_s;
     end
 
+  logic upd_q;
   always_ff @(posedge dclk or negedge drst_n)
     if (!drst_n) begin
       req_tog_q <= 1'b0;
       q         <= '0;
-    end else if (req_tog_q == ack_d) begin
-      q         <= snap_q;
-      req_tog_q <= ~req_tog_q;
+      upd_q     <= 1'b0;
+    end else begin
+      upd_q <= 1'b0;
+      if (req_tog_q == ack_d) begin
+        q         <= snap_q;
+        req_tog_q <= ~req_tog_q;
+        upd_q     <= 1'b1;
+      end
     end
+  assign upd = upd_q;
 endmodule
 
 `endif // TJ_CDC_SV
