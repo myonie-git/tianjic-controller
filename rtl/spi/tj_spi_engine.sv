@@ -1,12 +1,14 @@
 // File        : tj_spi_engine.sv
 // Module      : tj_spi_engine
-// Description : SPI master for one group of four dies.
+// Description : SPI master for one group of four or eight dies.
 //               Mode 0, MSB first; single-word and 16-word reads and writes.
 
 module tj_spi_engine
   import tj_ctrl_pkg::*;
 #(
-  parameter int unsigned GRP = 0            // Group index; must match die_id[4:2].
+  parameter int unsigned GRP = 0,
+  parameter int unsigned DIES_PER_GRP = 4,
+  localparam int unsigned DIE_SEL_W = $clog2(DIES_PER_GRP)
 )(
   input  logic        clk,
   input  logic        rst_n,
@@ -31,13 +33,17 @@ module tj_spi_engine
   // Group-shared SCLK/MOSI; separate CS/MISO per die.
   output logic        sclk,
   output logic        mosi,
-  output logic [3:0]  cs_n,
-  input  logic [3:0]  miso
+  output logic [DIES_PER_GRP-1:0] cs_n,
+  input  logic [DIES_PER_GRP-1:0] miso
 );
+
+  if ((DIES_PER_GRP != 4 && DIES_PER_GRP != 8) || GRP >= 32 / DIES_PER_GRP) begin : g_group_guard
+    $fatal(1, "SPI requires four or eight dies per group and a valid group index.");
+  end
 
   // Latched command and configuration.
   logic [1:0]  kind_q;
-  logic [1:0]  die_q;
+  logic [DIE_SEL_W-1:0] die_q;
   logic [31:0] addr_q;
   logic [7:0]  div_q;
   logic [31:0] tmo_q;
@@ -77,7 +83,7 @@ module tj_spi_engine
   assign cmd_ready  = (st_q == S_IDLE) && !skid_v_q;
 
   // Direct MISO sampling; account for board round-trip delay.
-  wire [3:0] miso_sel = miso >> die_q;
+  wire [DIES_PER_GRP-1:0] miso_sel = miso >> die_q;
   wire       miso_bit = miso_sel[0];
   assign busy = (st_q != S_IDLE);
 
@@ -148,7 +154,7 @@ module tj_spi_engine
           cs_n <= '1;
           if (cmd_valid && cmd_ready) begin
             kind_q    <= cmd_kind;
-            die_q     <= die_id[1:0];
+            die_q     <= die_id[DIE_SEL_W-1:0];
             addr_q    <= addr;
             div_q     <= cfg_clkdiv;
             tmo_q     <= cfg_tmo;
@@ -321,7 +327,7 @@ module tj_spi_engine
 `ifdef TJ_ASSERT_ON
   // Accepted commands must target this group.
   property p_die_grp;
-    @(posedge clk) disable iff (!rst_n) (cmd_valid && cmd_ready) |-> (die_id[4:2] == GRP[2:0]);
+    @(posedge clk) disable iff (!rst_n) (cmd_valid && cmd_ready) |-> ((die_id >> DIE_SEL_W) == 5'(GRP));
   endproperty
   a_die_grp: assert property (p_die_grp);
 `endif

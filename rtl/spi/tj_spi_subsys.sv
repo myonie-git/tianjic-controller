@@ -1,19 +1,22 @@
 // File        : tj_spi_subsys.sv
 // Module      : tj_spi_subsys
-// Description : Eight SPI groups shared by CSR doorbells, SPIWIN and BOOT.
-//               Four dies per group; pclk domain, active-low asynchronous reset.
+// Description : CSR-selected SPI groups shared by doorbells, SPIWIN and BOOT.
+//               Four or eight dies per group; pclk domain, active-low asynchronous reset.
 
 // CSR-controlled single-word SPI transactions.
-module tj_spi_doorbell (
+module tj_spi_doorbell #(
+  parameter int unsigned DIE_SEL_W = 2,
+  localparam int unsigned GRP_SEL_W = 5 - DIE_SEL_W
+)(
   input  logic        clk,
   input  logic        rst_n,
   // CSR interface (pclk domain).
   input  logic        db_go,        // Ignored while busy.
   input  logic [1:0]  csr_kind,      // 0: write; 1: read; 2/3: no-op.
-  input  logic [1:0]  csr_die,
+  input  logic [DIE_SEL_W-1:0] csr_die,
   input  logic [31:0] csr_addr,
   input  logic [31:0] csr_wdata,
-  input  logic [2:0]  grp_id,        // SPI group index (0..7).
+  input  logic [GRP_SEL_W-1:0] grp_id,        // SPI group index (0..7).
   output logic [31:0] rdata_o,
   output logic        busy_o,
   output logic        done_set_o,
@@ -377,16 +380,21 @@ endmodule
 // Shared SPIWIN and per-group doorbell, arbiter, and engine instances.
 module tj_spi_subsys
   import tj_ctrl_pkg::*, tj_ctrl_csr_pkg::*;
-(
+#(
+  parameter int unsigned N_SPI_GRP = TJ_CSR_SPI_N,
+  localparam int unsigned DIES_PER_GRP = N_DIE / N_SPI_GRP,
+  localparam int unsigned DIE_SEL_W = $clog2(DIES_PER_GRP),
+  localparam int unsigned GRP_SEL_W = $clog2(N_SPI_GRP)
+)(
   input  logic          pclk,
   input  logic          presetn,
   input  tj_csr_o_t     hwo,
   // Status and events returned to the parent CSR interface.
-  output logic [7:0][31:0] spi_rdata_o,
-  output logic [7:0]       spi_busy_o,      // Doorbell busy (SPI.STA.BUSY).
-  output logic [7:0]       eng_busy_o,      // Engine busy, including SPIWIN (GLB.STA.SPI_BUSY).
-  output logic [7:0]       spi_done_set_o,
-  output logic [7:0]       spi_err_set_o,
+  output logic [N_SPI_GRP-1:0][31:0] spi_rdata_o,
+  output logic [N_SPI_GRP-1:0]       spi_busy_o,      // Doorbell busy (SPI.STA.BUSY).
+  output logic [N_SPI_GRP-1:0]       eng_busy_o,      // Engine busy, including SPIWIN (GLB.STA.SPI_BUSY).
+  output logic [N_SPI_GRP-1:0]       spi_done_set_o,
+  output logic [N_SPI_GRP-1:0]       spi_err_set_o,
   output logic             spiwin_busy_o,
   output logic             spiwin_err_set_o,
   // BOOT 引擎全局事务主口(批次 BOOT;经 gmux 与 SPIWIN 合流)
@@ -443,7 +451,14 @@ module tj_spi_subsys
   logic [N_SPI_GRP-1:0] g_cmd_ready, g_wdat_ready, g_rdat_valid, g_done, g_err;
   logic [N_SPI_GRP-1:0][31:0] g_rdat;
 
-  wire [2:0] w_grp = w_die[4:2];
+  if (N_SPI_GRP != TJ_CSR_SPI_N || (N_SPI_GRP != 4 && N_SPI_GRP != 8)) begin : g_group_guard
+    $fatal(1, "SPI group count must match the CSR and be four or eight.");
+  end
+  if ($bits(hwo.spi_cmd_die[0]) != DIE_SEL_W) begin : g_die_width_guard
+    $fatal(1, "SPI die selector width must match the CSR.");
+  end
+
+  wire [GRP_SEL_W-1:0] w_grp = w_die[4:DIE_SEL_W];
   assign w_cmd_ready  = g_cmd_ready[w_grp];
   assign w_wdat_ready = g_wdat_ready[w_grp];
   assign w_rdat_valid = g_rdat_valid[w_grp];
@@ -504,14 +519,14 @@ module tj_spi_subsys
     logic        e_done, e_err;
     logic [31:0] rdat_bus;
 
-    wire a_sel = w_cmd_valid && (w_grp == 3'(g));
+    wire a_sel = w_cmd_valid && (w_grp == GRP_SEL_W'(g));
 
-    tj_spi_doorbell u_db (
+    tj_spi_doorbell #(.DIE_SEL_W(DIE_SEL_W)) u_db (
       .clk(pclk), .rst_n(presetn),
       .db_go(hwo.spi_db_go[g]),
       .csr_kind(hwo.spi_cmd_kind[g]), .csr_die(hwo.spi_cmd_die[g]),
       .csr_addr(hwo.spi_addr[g]), .csr_wdata(hwo.spi_wdata[g]),
-      .grp_id(3'(g)),
+      .grp_id(GRP_SEL_W'(g)),
       .rdata_o(spi_rdata_o[g]), .busy_o(spi_busy_o[g]),
       .done_set_o(spi_done_set_o[g]), .err_set_o(spi_err_set_o[g]),
       .cmd_valid(d_cmd_valid), .cmd_ready(d_cmd_ready),
@@ -525,7 +540,7 @@ module tj_spi_subsys
       .clk(pclk), .rst_n(presetn),
       .a_cmd_valid(a_sel), .a_cmd_ready(g_cmd_ready[g]),
       .a_die(w_die), .a_kind(w_kind), .a_addr(w_addr),
-      .a_wdat_valid(w_wdat_valid && (w_grp == 3'(g))), .a_wdat_ready(g_wdat_ready[g]),
+      .a_wdat_valid(w_wdat_valid && (w_grp == GRP_SEL_W'(g))), .a_wdat_ready(g_wdat_ready[g]),
       .a_wdat(w_wdat),
       .a_rdat_valid(g_rdat_valid[g]), .a_rdat_ready(w_rdat_ready),
       .a_done(g_done[g]), .a_err(g_err[g]),
@@ -543,7 +558,7 @@ module tj_spi_subsys
     );
     assign g_rdat[g] = rdat_bus;
 
-    tj_spi_engine #(.GRP(g)) u_eng (
+    tj_spi_engine #(.GRP(g), .DIES_PER_GRP(DIES_PER_GRP)) u_eng (
       .clk(pclk), .rst_n(presetn),
       .cfg_clkdiv(hwo.spi_clkdiv[g]), .cfg_tmo(hwo.spi_tmo[g]),
       .cmd_valid(e_cmd_valid), .cmd_ready(e_cmd_ready),
@@ -552,7 +567,7 @@ module tj_spi_subsys
       .rdat_valid(e_rdat_valid), .rdat_ready(e_rdat_ready), .rdat(e_rdat),
       .done(e_done), .err_timeout(e_err), .busy(eng_busy_o[g]),
       .sclk(spi_sclk[g]), .mosi(spi_mosi[g]),
-      .cs_n(spi_cs_n[g*4 +: 4]), .miso(spi_miso[g*4 +: 4])
+      .cs_n(spi_cs_n[g*DIES_PER_GRP +: DIES_PER_GRP]), .miso(spi_miso[g*DIES_PER_GRP +: DIES_PER_GRP])
     );
   end
 

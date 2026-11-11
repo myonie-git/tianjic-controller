@@ -4,15 +4,16 @@
 module tj_ctrl_top
   import tj_ctrl_pkg::*, tj_ctrl_csr_pkg::*;
 #(
-  // N_CH must match the implemented CSR channel count (currently three).
-  parameter int unsigned N_CH        = N_CH_V1,
+  // N_CH must match the implemented CSR channel count (selected by the generated CSR).
+  parameter int unsigned N_CH        = TJ_CSR_RECV_N,
   parameter int unsigned N_LVDS_INST = (N_CH + 2) / 3, // Three channel groups per instance.
   parameter int unsigned AXI_AW      = 48,
   // The connected data path supports 128-bit AXI beats.
   parameter int unsigned AXI_DW      = 128,
   parameter int unsigned AXI_UW      = 10,  // USER fields are tied to zero.
   parameter int unsigned AXI_IDW     = 4,
-  parameter int unsigned APB_AW      = 16   // Matches the CSR address port.
+  parameter int unsigned APB_AW      = 16,  // Matches the CSR address port.
+  parameter int unsigned N_SPI_GRP   = TJ_CSR_SPI_N
 )(
 
   // pclk: CSR, SPI and configuration chains; maxi_clk: AXI, packets and timestamps.
@@ -102,10 +103,15 @@ module tj_ctrl_top
   output logic [3:0]             clkctl,      // Reset value: zero; polarity depends on wiring.
   // Reserved UART; TX remains high.
   input  logic                   uart_rx,
-  output logic                   uart_tx
+  output logic                   uart_tx,
+  // pclk-domain status for external memory ownership and board debug.
+  output logic                   send_busy_o, boot_busy_o
 );
 
   // Supported top-level parameter combinations.
+  if (N_SPI_GRP != TJ_CSR_SPI_N) begin : g_spi_group_guard
+    $fatal(1, "N_SPI_GRP must match the CSR SPI bank count.");
+  end
   if (N_CH != TJ_CSR_RECV_N) begin : g_nch_guard
     $fatal(1, "N_CH must match the CSR channel count.");
   end
@@ -137,8 +143,8 @@ module tj_ctrl_top
     .hwi, .hwo
   );
 
-  logic [7:0][31:0] spi_rdata_w;
-  logic [7:0]       spi_busy_w, eng_busy_w, spi_done_w, spi_err_w;
+  logic [N_SPI_GRP-1:0][31:0] spi_rdata_w;
+  logic [N_SPI_GRP-1:0] spi_busy_w, eng_busy_w, spi_done_w, spi_err_w;
   logic             spiwin_busy_w, spiwin_err_w;
 
   logic [32:0] cc_din_w;
@@ -181,8 +187,11 @@ module tj_ctrl_top
   logic [AXI_AW-1:0]     mwr_addr;
   logic [127:0]          mwr_data;
 
+  assign send_busy_o = send_busy_w;
+  assign boot_busy_o = boot_busy_w;
+
   // SPI engines, doorbells and the blocking window.
-  tj_spi_subsys u_spi (
+  tj_spi_subsys #(.N_SPI_GRP(N_SPI_GRP)) u_spi (
     .pclk, .presetn, .hwo(hwo),
     .spi_rdata_o(spi_rdata_w), .spi_busy_o(spi_busy_w), .eng_busy_o(eng_busy_w),
     .spi_done_set_o(spi_done_w), .spi_err_set_o(spi_err_w),

@@ -5,6 +5,7 @@
 module tb_tj_ctrl_apb_smoke;
   timeunit 1ns;
   timeprecision 1ps;
+  import tj_ctrl_csr_pkg::*;
 
   logic pclk = 0, presetn = 0, maxi_clk = 0, maxi_rstn = 0;
   always #5   pclk = ~pclk;         // 100 MHz.
@@ -110,6 +111,15 @@ module tb_tj_ctrl_apb_smoke;
     apb_wr(16'h0200, 32'h0);
     repeat (2) @(posedge pclk);
     chk(chip_rst_n === 32'h0, "RST_LEVEL reasserts reset outputs");
+
+    // The generated CSR selects SPI and RECV dimensions without global macros.
+    apb_rd(16'h0004, rd);
+    chk(rd === (TJ_CSR_SPI_N == 4 ? 32'h200 : 32'h100), "Profile VERSION");
+    for (int g=0; g<TJ_CSR_SPI_N; g++) begin
+      apb_wr(16'(16'h0400 + g*16'h80), 32'h70);
+      apb_rd(16'(16'h0400 + g*16'h80), rd);
+      chk(rd === (TJ_CSR_SPI_N == 4 ? 32'h70 : 32'h30), "SPI.CMD.DIE width");
+    end
 
     if (errs == 0 && checks > 0)
       $display("CTRL APB SMOKE TB PASS (%0d checks)", checks);

@@ -86,10 +86,11 @@ endinterface
 // Grouped SPI clocks/data with per-die CS and MISO.
 // Physical pin mapping is provided by the board wrapper.
 interface tj_spi_phy_if #(
-  parameter int unsigned N_DIE_P = tj_ctrl_pkg::N_DIE
+  parameter int unsigned N_DIE_P = tj_ctrl_pkg::N_DIE,
+  parameter int unsigned N_SPI_GRP_P = tj_ctrl_pkg::N_SPI_GRP
 )(input logic clk, input logic rst_n);
-  logic [tj_ctrl_pkg::N_SPI_GRP-1:0] sclk;
-  logic [tj_ctrl_pkg::N_SPI_GRP-1:0] mosi;
+  logic [N_SPI_GRP_P-1:0] sclk;
+  logic [N_SPI_GRP_P-1:0] mosi;
   logic [N_DIE_P-1:0]                cs_n;    // Active-low chip select per die.
   logic [N_DIE_P-1:0]                miso;    // Logical MISO per die.
 
