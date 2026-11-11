@@ -1,12 +1,14 @@
 # Common CDC paths in tj_ctrl_top for Quartus TimeQuest.
 # Load with the five per-path constraints listed in the Controller README.
+# Board PLL clock names may be mapped explicitly; standalone default is pclk.
+if {![info exists TJ_CTRL_PCLK]} { set TJ_CTRL_PCLK pclk }
 
 # Only the first stage receives asynchronous data.
 set_false_path -to [get_keepers {*|meta_q*}]
 
 # Bound SEND configuration before GO captures it in maxi_clk.
 foreach tj_send_sync {u_src_syn u_cnt_syn u_en_syn u_rm0_syn u_rm1_syn} {
-    set_data_delay -from [get_clocks pclk] \
+    set_data_delay -from [get_clocks $TJ_CTRL_PCLK] \
         -to [get_registers "*u_send*|*${tj_send_sync}*|meta_q*"] \
         -get_value_from_clock_period dst_clock_period -value_multiplier 1.0
 }
@@ -14,7 +16,7 @@ unset tj_send_sync
 
 # Bound RECV configuration before reception is enabled.
 foreach tj_recv_sync {u_base u_size u_wmk u_en u_pol u_remap0} {
-    set_data_delay -from [get_clocks pclk] \
+    set_data_delay -from [get_clocks $TJ_CTRL_PCLK] \
         -to [get_registers "*u_recv*|*${tj_recv_sync}*|meta_q*"] \
         -get_value_from_clock_period dst_clock_period -value_multiplier 1.0
 }
