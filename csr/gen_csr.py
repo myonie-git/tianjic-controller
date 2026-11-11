@@ -969,7 +969,7 @@ def main():
     for directory in (a.out_rtl, a.out_doc, a.out_tb):
         os.makedirs(directory, exist_ok=True)
     for path, text in outs:
-        with io.open(path, 'w', encoding='utf-8') as f:
+        with io.open(path, 'w', encoding='utf-8', newline='\n') as f:
             f.write(text)
     print('gen_csr: %d blocks, %d live reg instances, outputs:' % (len(blocks), n_regs))
     for path, _ in outs:

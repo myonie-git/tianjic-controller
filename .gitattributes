@@ -1,0 +1,5 @@
+*.sh text eol=lf
+*.py text eol=lf
+rtl/csr/*.sv text eol=lf
+tb/csr/*.sv text eol=lf
+doc/tj_ctrl_regmap.md text eol=lf
