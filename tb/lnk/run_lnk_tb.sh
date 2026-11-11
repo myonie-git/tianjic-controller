@@ -73,7 +73,7 @@ vlogan -full64 -sverilog "+incdir+$lnk_ctrl/tb/common" -timescale=1ps/1fs +error
   "$lnk_ctrl/rtl/csr/tj_ctrl_csr_pkg.sv" \
   "$lnk_ctrl/rtl/csr/tj_ctrl_csr.sv" \
   "$lnk_ctrl/rtl/lnk/tj_cfgchain_master.sv" \
-  "$lnk_ctrl/rtl/lnk/tj_lnk_plugs.sv" \
+  "$lnk_ctrl/tb/lnk/tj_lnk_plugs.sv" \
   "$lnk_here/tb_tj_lnk.sv" \
   "$lnk_here/tb_tj_cfgchain.sv" > vlogan_tb.log 2>&1
 if lnk_selected lnk; then
