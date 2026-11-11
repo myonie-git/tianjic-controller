@@ -304,12 +304,36 @@ class Block(object):
         return [r for r in self.regs if r.impl == 'v1']
 
 
-def load_model(path):
+def load_model(path, profile="default"):
     global SRC_MD5
     with io.open(path, encoding='utf-8') as f:
         text = f.read()
     SRC_MD5 = hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
     doc = _Yaml(text).parse()
+    if profile != 'default':
+        try:
+            cfg = doc['profiles'][profile]
+        except KeyError:
+            raise ValueError('Unknown CSR profile: ' + profile)
+        groups, dies = cfg['spi_groups'], cfg['spi_dies_per_group']
+        if (groups, dies) not in ((8, 4), (4, 8)):
+            raise ValueError('Supported SPI layouts: 8 x 4 or 4 x 8')
+        if not 1 <= cfg['recv_channels'] <= 12:
+            raise ValueError('RECV channels must be in 1..12')
+        doc['meta']['version'] = cfg['version']
+        by_name = {b['name']: b for b in doc['blocks']}
+        spi = by_name['SPI']
+        spi['impl_count'] = groups
+        spi['desc'] = 'SPI: %d groups, %d dies per group; independent CS/MISO.' % (groups, dies)
+        cmd = next(r for r in spi['regs'] if r['name'] == 'CMD')
+        die = next(f for f in cmd['fields'] if f['name'] == 'DIE')
+        die['bits'] = '%d:4' % (4 + (dies - 1).bit_length() - 1)
+        die['desc'] = 'Local die 0..%d; CS index = group * %d + DIE.' % (dies - 1, dies)
+        by_name['RECV']['impl_count'] = cfg['recv_channels']
+        version = next(r for r in by_name['GLB']['regs'] if r['name'] == 'VERSION')
+        version['const'] = cfg['version_register']
+        # Distinguish generated variants of the same source file.
+        SRC_MD5 = hashlib.md5((text + '\nprofile=' + profile).encode('utf-8')).hexdigest()[:12]
     meta = doc['meta']
     blocks = [Block(b) for b in doc['blocks']]
     blocks.sort(key=lambda b: b.base)
@@ -926,12 +950,13 @@ def emit_tb(meta, blocks):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('yaml')
+    ap.add_argument('--profile', default='default', help='Named profile declared in the YAML; default preserves the chip ABI')
     ap.add_argument('--out-rtl', required=True)
     ap.add_argument('--out-doc', required=True)
     ap.add_argument('--out-tb', required=True)
     a = ap.parse_args()
 
-    meta, blocks = load_model(a.yaml)
+    meta, blocks = load_model(a.yaml, a.profile)
 
     live = list(iter_live(blocks))
     n_regs = sum((b.impl_count if b.count > 1 else 1) for b, r in live)

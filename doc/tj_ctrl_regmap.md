@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 映射版本 | v0.1.0 |
-| 真源指纹 | md5=0c569873406e(gen_csr.py 自动生成,真源 `controller/csr/tj_ctrl_csr.yaml`,勿手改;同源再生成逐字节相同)|
+| 真源指纹 | md5=3b5ef9d7db97(gen_csr.py 自动生成,真源 `controller/csr/tj_ctrl_csr.yaml`,勿手改;同源再生成逐字节相同)|
 | 总线 | APB,32bit 数据,字节地址,窗口 64KB;零等待;未映射/预留地址返回 pslverr |
 | 约定 | W1C=硬件置位、写 1 清零(同拍冲突置位优先);脉冲=写 1 出单拍、读恒 0;写 RO 忽略不报错 |
 

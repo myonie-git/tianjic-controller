@@ -21,6 +21,15 @@ meta:
   apb_aw: 16
   data_w: 32
 
+# Explicit board ABI; the default register map above remains v0.1.0.
+profiles:
+  agilex4:
+    version: "0.2.0"
+    version_register: 0x00000200
+    spi_groups: 4
+    spi_dies_per_group: 8
+    recv_channels: 12
+
 blocks:
   # Global identification, control, and status.
   - name: GLB
