@@ -12,6 +12,7 @@
 # DSEEDS selects seeds for SEND, RECV and BOOT.
 # JSEEDS selects seeds for the three-clock-ratio CDC jitter runs.
 # SKIP_APB_SMOKE, SKIP_SG and SKIP_LNK skip the corresponding stages.
+# PROFILE_SIMULATOR selects vcs (default) or questa for the profiles stage.
 set -u
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -38,7 +39,7 @@ selected() {
 }
 for stage in $REGRESS_TESTS; do
   case "$stage" in
-    gen|csr|spi|top|apb_smoke|static|image|init|lnk|cfgchain|send|recv|boot|bypass|bypass_disabled|bypass_csr|jitter) ;;
+    gen|csr|spi|top|apb_smoke|static|image|init|lnk|cfgchain|send|recv|boot|bypass|bypass_disabled|bypass_csr|jitter|profiles) ;;
     *) printf 'Unknown REGRESS_TESTS stage: %s\n' "$stage" >&2; exit 2 ;;
   esac
 done
@@ -567,6 +568,15 @@ if selected jitter; then
   done
 else
   say "SKIP jitter (not selected)"
+fi
+
+# Both supported CSR/SPI configurations use the same production RTL.
+if selected profiles; then
+  if python3 "$TJ_CTRL_HOME/tb/spi/run_profiles.py" --simulator "${PROFILE_SIMULATOR:-vcs}" --work "$WORK/profiles"; then
+    say "CSR/SPI profiles passed"
+  else
+    bad "CSR/SPI profile regression failed (see $WORK/profiles)"
+  fi
 fi
 
 # Overall result.
