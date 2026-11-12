@@ -1,7 +1,5 @@
-// Source roots are exported by run_lnk_tb.sh.
-$YAWING_DESIGN/rtl/common/core_cfg/apb2cfg.sv
-$YAWING_DESIGN/rtl/common/core_cfg/core_cfg_pp.sv
-$YAWING_DESIGN/rtl/common/core_cfg/core_cfg_wrap.sv
+// Controller LVDS plus external chip simulation technology models.
+// Roots are exported by run_lnk_tb.sh or resolved by run_lnk_questa.py.
 $YAWING_DESIGN/rtl/common/macro_cells/macro_buf.v
 $YAWING_DESIGN/rtl/common/macro_cells/macro_clk_buf.v
 $YAWING_DESIGN/rtl/common/macro_cells/macro_clk_div2.v
@@ -30,50 +28,7 @@ $YAWING_DESIGN/rtl/common/macro_cells/macro_sync2r.v
 $YAWING_DESIGN/rtl/common/macro_cells/macro_sync2s.v
 $YAWING_DESIGN/rtl/common/macro_cells/macro_sync3r.v
 $YAWING_DESIGN/rtl/common/macro_cells/macro_sync3s.v
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/arbiter.sv
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/axis_arb.sv
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/axis_arb_mux.sv
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/axis_arb_rr.sv
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/axis_async_fifo.sv
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/axis_demux.sv
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/axis_fifo.sv
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/axis_mimo_rx.sv
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/axis_mimo_tx.sv
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/axis_mux.sv
-$YAWING_DESIGN/rtl/lvds_subsys/axis_switch/priority_encoder.sv
-$YAWING_DESIGN/rtl/lvds_subsys/common/crc_64bits_gen.v
-$YAWING_DESIGN/rtl/lvds_subsys/common/cross_event_gen.sv
-$YAWING_DESIGN/rtl/lvds_subsys/common/generic_afifo_ctrl.sv
-$YAWING_DESIGN/rtl/lvds_subsys/common/lvds_crc_gen.sv
-$YAWING_DESIGN/rtl/lvds_subsys/common/lvds_generic_afifo.sv
-$YAWING_DESIGN/rtl/lvds_subsys/common/lvds_generic_afifo_regfile.sv
-$YAWING_DESIGN/rtl/lvds_subsys/common/lvds_if_pkg.sv
-$YAWING_DESIGN/rtl/lvds_subsys/common/lvds_pads.v
-$YAWING_DESIGN/rtl/lvds_subsys/common/prbs8_gen.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_rx/lvds_dec_8b10b.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_rx/lvds_rx_axis_if.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_rx/lvds_rx_bit_calib.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_rx/lvds_rx_bit_calib_sl.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_rx/lvds_rx_bit_ctrl.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_rx/lvds_rx_cru.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_rx/lvds_rx_ctrl.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_rx/lvds_rx_pad_wrap.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_rx/lvds_rx_word_ctrl.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_rx/lvds_rx_wrap.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_tx/lvds_enc_8b10b.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_tx/lvds_sync_fifo.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_tx/lvds_tx_axis_if.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_tx/lvds_tx_bit_ctrl.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_tx/lvds_tx_calib.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_tx/lvds_tx_cru.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_tx/lvds_tx_ctrl.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_tx/lvds_tx_pad_wrap.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_tx/lvds_tx_word_ctrl.sv
-$YAWING_DESIGN/rtl/lvds_subsys/lvds_tx/lvds_tx_wrap.sv
-$YAWING_DESIGN/rtl/lvds_subsys/top/lvds_core_cfg_wrap.sv
-$YAWING_DESIGN/rtl/lvds_subsys/top/lvds_subsys.sv
-$YAWING_DESIGN/rtl/lvds_subsys/top/lvds_subsys_csr.sv
-$YAWING_DESIGN/rtl/lvds_subsys/top/lvds_tx_rx_wrap.sv
 $YAWING_DESIGN/model/stdcell/um28nphllogl35udl140f.v
 $YAWING_DESIGN/model/lvds/CS_UMC28_BIDIR_LVDSH.v
 $DW_SIM_DIR/DW_ecc.v
+-f ${TJ_CTRL_HOME}/flist/tj_lvds.f

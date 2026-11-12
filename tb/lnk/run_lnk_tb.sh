@@ -19,6 +19,11 @@ lnk_script=$(readlink -f "$0")
 lnk_here=$(dirname "$lnk_script")
 lnk_ctrl=$(dirname "$(dirname "$lnk_here")")
 lnk_repo=$(dirname "$lnk_ctrl")
+case "${LNK_SIMULATOR:-vcs}" in
+  questa) exec python3 "$lnk_here/run_lnk_questa.py" "$@" ;;
+  vcs) ;;
+  *) printf 'Unknown LNK_SIMULATOR: %s\n' "$LNK_SIMULATOR" >&2; exit 2 ;;
+esac
 lnk_work=${1:-$(mktemp -d "${TMPDIR:-/tmp}/tj_lnk.XXXXXX")}
 if [ "$#" -gt 0 ]; then shift; fi
 if [ "$#" -eq 0 ]; then set -- 1 31 166; fi
@@ -40,7 +45,8 @@ if [ ! -r "$DW_SIM_DIR/DW_ecc.v" ]; then
   exit 2
 fi
 DW_SIM_DIR=$(cd "$DW_SIM_DIR" && pwd)
-export YAWING_DESIGN DW_SIM_DIR
+TJ_CTRL_HOME=$lnk_ctrl
+export TJ_CTRL_HOME YAWING_DESIGN DW_SIM_DIR
 
 # Preserve the simulator exit status before checking its final PASS summary.
 run_checked() {

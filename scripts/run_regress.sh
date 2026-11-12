@@ -13,6 +13,7 @@
 # JSEEDS selects seeds for the three-clock-ratio CDC jitter runs.
 # SKIP_APB_SMOKE, SKIP_SG and SKIP_LNK skip the corresponding stages.
 # PROFILE_SIMULATOR selects vcs (default) or questa for the profiles stage.
+# LNK_SIMULATOR selects vcs (default) or questa for lnk/cfgchain.
 set -u
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -331,10 +332,10 @@ if selected lnk || selected cfgchain; then
   echo
   if [ "${SKIP_LNK:-0}" = "1" ]; then
     say "[9/14] LVDS 链路验收 TB:跳过(SKIP_LNK=1)"
-  elif [ ! -f "$YAWING_DESIGN/rtl/lvds_subsys/top/lvds_subsys.sv" ]; then
-    say "[9/14] LVDS 链路验收 TB:芯片 lvds 树不可达,跳过"
+  elif [ ! -f "$TJ_CTRL_HOME/rtl/lvds/top/lvds_subsys.sv" ]; then
+    bad "[9/14] Controller LVDS 源码缺失"
   else
-    say "[9/14] LVDS 链路验收 TB(链主机 + 两份芯片原版 lvds_subsys 对打,T1-T4)"
+    say "[9/14] LVDS 链路验收 TB(链主机 + 两份controller LVDS副本对打,T1-T4)"
     lnk_tests=""
     selected lnk && lnk_tests="$lnk_tests lnk"
     selected cfgchain && lnk_tests="$lnk_tests cfgchain"
