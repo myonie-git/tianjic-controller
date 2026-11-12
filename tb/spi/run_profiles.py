@@ -50,7 +50,8 @@ def main():
         if profile == 'default':
             for a, b in [('rtl/tj_ctrl_csr_pkg.sv', 'rtl/csr/tj_ctrl_csr_pkg.sv'),
                          ('rtl/tj_ctrl_csr.sv', 'rtl/csr/tj_ctrl_csr.sv'),
-                         ('tb/tb_tj_ctrl_csr.sv', 'tb/csr/tb_tj_ctrl_csr.sv')]:
+                         ('tb/tb_tj_ctrl_csr.sv', 'tb/csr/tb_tj_ctrl_csr.sv'),
+                         ('doc/tj_ctrl_regmap.md', 'doc/tj_ctrl_regmap.md')]:
                 if (out / a).read_text(encoding='utf-8') != (CTRL / b).read_text(encoding='utf-8'):
                     raise SystemExit('Generated file drift: ' + b)
         sources = []

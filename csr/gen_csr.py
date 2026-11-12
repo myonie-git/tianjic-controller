@@ -310,6 +310,18 @@ def load_model(path, profile="default"):
         text = f.read()
     SRC_MD5 = hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
     doc = _Yaml(text).parse()
+    by_name = {b['name']: b for b in doc['blocks']}
+    default_die = next(f for r in by_name['SPI']['regs'] if r['name'] == 'CMD'
+                       for f in r['fields'] if f['name'] == 'DIE')
+    hi, lo = _bits(default_die['bits'])
+    default_cfg = dict(version=doc['meta']['version'],
+                       version_register=next(r['const'] for r in by_name['GLB']['regs']
+                                             if r['name'] == 'VERSION'),
+                       spi_groups=by_name['SPI'].get('impl_count', by_name['SPI']['count']),
+                       spi_dies_per_group=1 << (hi - lo + 1),
+                       recv_channels=by_name['RECV']['impl_count'])
+    profiles = dict(doc.get('profiles', {}), default=default_cfg)
+    cfg = default_cfg
     if profile != 'default':
         try:
             cfg = doc['profiles'][profile]
@@ -324,17 +336,37 @@ def load_model(path, profile="default"):
         by_name = {b['name']: b for b in doc['blocks']}
         spi = by_name['SPI']
         spi['impl_count'] = groups
-        spi['desc'] = 'SPI: %d groups, %d dies per group; independent CS/MISO.' % (groups, dies)
         cmd = next(r for r in spi['regs'] if r['name'] == 'CMD')
         die = next(f for f in cmd['fields'] if f['name'] == 'DIE')
         die['bits'] = '%d:4' % (4 + (dies - 1).bit_length() - 1)
-        die['desc'] = 'Local die 0..%d; CS index = group * %d + DIE.' % (dies - 1, dies)
         by_name['RECV']['impl_count'] = cfg['recv_channels']
         version = next(r for r in by_name['GLB']['regs'] if r['name'] == 'VERSION')
         version['const'] = cfg['version_register']
         # Distinguish generated variants of the same source file.
         SRC_MD5 = hashlib.md5((text + '\nprofile=' + profile).encode('utf-8')).hexdigest()[:12]
+    # Descriptions must follow the selected model, just like the generated RTL.
+    # Keep address/field definitions unchanged; these are documentation changes.
+    groups, dies, channels = cfg['spi_groups'], cfg['spi_dies_per_group'], cfg['recv_channels']
+    def reg(block, name):
+        return next(r for r in by_name[block]['regs'] if r['name'] == name)
+    def field(block, name, member):
+        return next(f for f in reg(block, name)['fields'] if f['name'] == member)
+    by_name['SPI']['desc'] = ('SPI组控制与状态；当前%d组，每组%d个die共用SCLK/MOSI、独立CS/MISO。'
+                              'CLKDIV/TMO与SPIWIN、BOOT共用。') % (groups, dies)
+    field('SPI', 'CMD', 'DIE')['desc'] = '组内die编号0～%d，对应片选cs_n[组号*%d+DIE]。' % (dies - 1, dies)
+    by_name['RECV']['desc'] = ('每个LVDS逻辑通道一套环形缓冲；当前实现通道0～%d，'
+                               '其余预留实例访问返回pslverr。') % (channels - 1)
+    reg('LNK', 'EN')['desc'] = '逻辑通道使能位图；当前有效[%d:0]。' % (channels - 1)
+    field('SPIWIN', 'PAGE', 'DIE')['desc'] = ('目标die全局编号0～31；组=DIE除%d，'
+                                             '组内编号=DIE模%d，片选=cs_n[DIE]。') % (dies, dies)
+    field('CC', 'CMD', 'INST')['desc'] = ('本地LVDS实例ID，与目标CORE_ID匹配，不是芯片die编号。'
+                                         '当前默认拓扑实例0～%d；集成时须保证CORE_ID唯一。') % ((channels + 2) // 3 - 1)
+    field('GLB', 'STA', 'SPI_BUSY')['desc'] += ' 当前有效[%d:0]，高位补0。' % (groups - 1)
+    reg('IRQ', 'RAW')['desc'] += (' 当前SPI完成事件源为位0～%d，RECV事件源为位12～%d；'
+                                 '未实例化通道无硬件事件源，IRQ.TST仍可测试注入。') % (groups - 1, 11 + channels)
     meta = doc['meta']
+    meta['profile'] = profile
+    meta['profiles'] = profiles
     blocks = [Block(b) for b in doc['blocks']]
     blocks.sort(key=lambda b: b.base)
     for a, b in zip(blocks, blocks[1:]):
@@ -637,17 +669,34 @@ def emit_doc(meta, blocks):
     o.append('| 项目 | 内容 |')
     o.append('|---|---|')
     o.append('| 映射版本 | v%s |' % meta['version'])
+    o.append('| 当前配置 | `%s`；下方寄存器表对应此配置 |' % meta['profile'])
     o.append('| 真源指纹 | md5=%s(gen_csr.py 自动生成,真源 `controller/csr/tj_ctrl_csr.yaml`,勿手改;同源再生成逐字节相同)|'
              % SRC_MD5)
-    o.append('| 总线 | APB,32bit 数据,字节地址,窗口 64KB;零等待;未映射/预留地址返回 pslverr |')
+    o.append('| 总线 | APB,32bit 数据,字节地址,窗口 64KB；CSR 零等待，SPIWIN 窗体可插入等待；未映射/预留地址返回 pslverr |')
     o.append('| 约定 | W1C=硬件置位、写 1 清零(同拍冲突置位优先);脉冲=写 1 出单拍、读恒 0;写 RO 忽略不报错 |')
+    o.append('')
+    o.append('## 配置与软件兼容性')
+    o.append('')
+    o.append('| 配置 | GLB.VERSION | SPI组 × die | SPI.CMD.DIE | RECV通道 | 默认LVDS实例 |')
+    o.append('|---|---|---|---|---|---|')
+    for name in ['default'] + sorted(k for k in meta['profiles'] if k != 'default'):
+        cfg = meta['profiles'][name]
+        dies, channels = cfg['spi_dies_per_group'], cfg['recv_channels']
+        o.append('| %s | 0x%08X | %d × %d | [%d:4] | 0～%d | 0～%d |' % (
+            name, cfg['version_register'], cfg['spi_groups'], dies,
+            4 + (dies - 1).bit_length() - 1, channels - 1, (channels + 2) // 3 - 1))
+    o.append('')
+    o.append('软件先读 `GLB.VERSION` 再选择组内DIE编码；BOOT.CMD.DIE与SPIWIN.PAGE.DIE均为全局0～31。')
+    o.append('地址基址/步进不随配置变化；访问未实现的SPI/RECV实例返回pslverr。')
+    o.append('`regen.sh`生成默认配置并提交到`controller/doc/tj_ctrl_regmap.md`；')
+    o.append('其他配置用`gen_csr.py --profile <配置名>`生成到独立build目录，RTL、TB与手册须来自同次生成。')
     o.append('')
     o.append('## 地址总览')
     o.append('')
     o.append('| 基址 | 块 | 实例 | 步进 | 说明 | 实现 |')
     o.append('|---|---|---|---|---|---|')
     for b in blocks:
-        inst = ('%d(v1 例化 %d)' % (b.count, b.impl_count)) if b.count > 1 else '1'
+        inst = ('%d(当前实现 %d)' % (b.count, b.impl_count)) if b.count > 1 else '1'
         step = '0x%02X' % b.stride if b.count > 1 else '—'
         impl = ('v1' if b.impl == 'v1' else
                 '外部模块' if b.impl == 'ext' else '预留(%s)' % b.impl)
@@ -658,7 +707,7 @@ def emit_doc(meta, blocks):
         o.append('')
         if b.count > 1:
             o.append('实例 k 的寄存器地址 = 0x%04X + k×0x%02X + 偏移;'
-                     '地址预留 %d 实例,v1 例化 %d(其余访问返回 pslverr)。'
+                     '地址预留 %d 实例,当前实现 %d(其余访问返回 pslverr)。'
                      % (b.base, b.stride, b.count, b.impl_count))
             o.append('')
         o.append('%s' % b.desc)
@@ -693,6 +742,22 @@ def emit_doc(meta, blocks):
                     bits, f.name or '—', kind, rst, desc))
                 first = False
         o.append('')
+    o.extend([
+        '## LVDS配置与预留功能', '',
+        'Host通过CC块(0x3800)访问本地LVDS CSR；CC.WDATA中的地址是LVDS字节偏移，',
+        '不是Host APB绝对地址，也不是SPI访问的芯片AHB地址。目标寄存器定义见',
+        '`controller/rtl/lvds/top/lvds_subsys_csr.sv`中的`*_OFFSET_ADDR`及对应读写逻辑。',
+        'CC配置时钟必须与目标实例配置时钟同域，每个实例的CORE_ID须唯一。', '',
+        '写入：等待CC空闲，以KIND=0发送地址并敲GO，等BUSY清零；',
+        '再以KIND=1发送数据并敲GO，等BUSY清零。两拍须使用同一INST且禁止插入其他链操作。',
+        '写操作没有目标返回确认；需要确认时通过读回验证。', '',
+        '读取：等待CC空闲，写1清除旧DVLD；以KIND=2或3发送地址并敲GO。',
+        '确认请求已处理后，等待新的DVLD再读取RDATA；BUSY清零而DVLD未置位可能是超时，',
+        '不得把旧RDATA当作本次结果。软件轮询须设超时。', '',
+        'LNK.FC_TMO、CNT_SEL、CNT_VAL、STA以及PRBS、TRACE仍为预留；',
+        '迁入LVDS源码不会自动增加这些Host寄存器。LVDS内部调试/校准CSR通过CC访问。',
+        '板级JTAG/debug_apb和演示RAM不属于controller寄存器ABI，旧0x9000诊断窗口不在本映射中。', '',
+    ])
     return '\n'.join(o) + '\n'
 
 
