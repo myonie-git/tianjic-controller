@@ -4,6 +4,8 @@
 - `tb_tj_spi_status.sv`：门铃状态回归，pclk=100MHz。P1 检查执行及完成/超时事件周期的 GO 忽略行为；P2 通过 APB 检查 WR1、RD1、超时和 KIND=2 的状态一致性，每项覆盖两种轮询相位。
 - `tb_tj_spi_arb2.sv`：仲裁器回归。P1检查优先级与授权保持；P2覆盖A/B在done或err同拍续接读写任务，以及无新命令时释放后另一方接管；P3检查READY为0时不能将请求误当作已接收。
 - `tb_tj_spi_timeout.sv`：超时恢复回归，45项检查。P1单写/单读中止；P2块写断供；P3块读请求后的排空阶段；P4块读取数阶段。检查CS高间隔、错误事件、BUSY/READY及后续读写；芯片AHB每拍固定4个等待。
+- `tb_tj_spi_profile.sv`：两种寄存器配置的 SPI 选路回归，160项检查。逐个 die 检查门铃写、门铃读、SPIWIN 读和 BOOT 写，最后核对每个 die 的写入次数以确认片选隔离；每个 die 由独立的线级从机模型应答。组数和位宽取自所编译的寄存器配置。
+- `tb_tj_spi_profile_invalid.sv`：故意让顶层 SPI 组数与寄存器配置不一致，展开时必须报错。
 
 从仓库根目录运行状态回归（需要 VCS 环境）：
 
@@ -46,6 +48,15 @@ vcs -full64 -nc tb_tj_spi_timeout -o simv
 该回归检查超时后的恢复，不保证被截断写操作没有副作用。
 
 运行完整SPI回归时，在上面的状态回归编译列表中加入 `soc/design/rtl/mcu_subsys/spi/spi2ahb.v` 的绝对路径，并将TB替换为 `tb_tj_spi.sv`、展开顶层改为 `tb_tj_spi`。通过时输出 `SPI TB PASS (520 checks)`。
+
+运行两种寄存器配置的检查（默认使用 VCS，`--simulator questa` 改用 Questa）：
+
+```sh
+python3 controller/tb/spi/run_profiles.py --work /tmp/tj_spi_profiles
+```
+
+脚本分别生成 default 和 agilex4 的寄存器，编译生产 RTL，运行 CSR 自测、`tb_tj_spi_profile` 和顶层 APB 冒烟，
+再确认 `tb_tj_spi_profile_invalid` 展开失败。通过时输出 `CSR/SPI PROFILES PASS`；回归中对应 `profiles` 阶段。
 
 
 ## 选择性运行

@@ -1,7 +1,10 @@
 # Controller top tests
 
 `tb_tj_ctrl_apb_smoke.sv` checks ID, SCRATCH, APB responses and chip reset outputs.
-The shared-library stage of `controller/scripts/run_regress.sh` runs this test.
+It also checks `GLB.VERSION` and the `SPI.CMD.DIE` width of every implemented SPI group
+for the compiled register configuration. The shared-library stage of
+`controller/scripts/run_regress.sh` runs this test with the default configuration;
+the `profiles` stage runs it with both configurations.
 `run_top_tb.py` runs the separate timestamp and top-level control test below.
 
 `tb_tj_ctrl_ts.sv` uses public APB and top-level ports. CASE 0 checks APB routing,

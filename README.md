@@ -15,16 +15,16 @@
 | `rtl/spi/` | SPI 引擎、门铃、SPIWIN/BOOT仲裁、SPIWIN 窗口及北向旁路 SPI 从机 |
 | `rtl/boot/` | BOOT子系统封装、装载控制及64字节取数前端 |
 | `rtl/dma/` | SEND 取数与分发、RECV 环形写入、AXI 后端及指针快照同步 |
-| `rtl/lnk/` | FPGA 侧配置链主机，以及仿真用的直连和芯片 LVDS 适配模块 |
+| `rtl/lnk/` | FPGA 侧配置链主机 |
 | `rtl/common/` | 电平、脉冲、事件及整字快照同步单元 |
 | `flist/` | 生产 RTL 清单 `tj_ctrl.f`，仿真清单 `tj_ctrl_cosim.f` |
 | `scripts/` | 回归、芯片仿真入口和跨域时序约束 |
-| `tb/` | 模块测试、镜像检查、初始化重放和芯片联合仿真 |
+| `tb/` | 模块测试、镜像检查、初始化重放、芯片联合仿真，以及仿真用的直连和芯片 LVDS 适配模块 |
 | `sw/` | 镜像导出、结果比较和格式自检工具 |
 | `doc/` | 随源码提供的寄存器手册 |
 
 现有 RTL 模块通过平铺端口连接；`rtl/pkg/tj_ctrl_if.sv` 保留了接口声明，尚未用于这些连接。
-生产清单包含 Controller RTL；仿真清单另加 `tj_lnk_plugs.sv`，芯片模型依赖由对应测试清单提供。
+生产清单包含 Controller RTL；仿真清单另加 `tb/lnk/tj_lnk_plugs.sv`，芯片模型依赖由对应测试清单提供。
 BOOT由`tj_boot_subsys`连接控制引擎和取数前端；共享读仲裁位于顶层，SPI仲裁位于SPI子系统。
 `tj_bypass_spi` 由外层系统例化。`ENABLE_BYPASS_SPI` 默认 `0`，APB 直接透传并释放 MISO。
 实例参数设为 `.ENABLE_BYPASS_SPI(1'b1)` 时启用外部 SPI，并与上游 APB 请求仲裁后送入 `tj_ctrl_top`。
@@ -35,11 +35,15 @@ BOOT由`tj_boot_subsys`连接控制引擎和取数前端；共享读仲裁位于
 |---|---|
 | Host APB | 32位数据，默认16位地址；访问 CSR 和 SPIWIN |
 | DDR AXI4 | 默认48位地址、128位数据；SEND 使用 INCR 读突发，RECV 使用单拍写 |
-| 芯片侧 SPI | 8组引擎，每组选择4个 die；逻辑接口提供32路片选和32路 MISO |
+| 芯片侧 SPI | 默认8组引擎、每组4个 die，agilex4 配置为4组、每组8个 die；逻辑接口提供32路片选和32路 MISO |
 | 北向旁路 SPI | 可选从机，mode 0、MSB first，SCLK不超过pclk/8 |
-| LVDS 包接口 | 每实例4个96位 `valid/ready/data` 端口；默认3个通道组、1个链路实例 |
+| LVDS 包接口 | 每实例4个96位 `valid/ready/data` 端口，每实例使用3个通道组；默认3个通道、1个链路实例，agilex4 配置为12个通道、4个实例 |
 | 配置链 | 33位输入、32位读回，配置 FPGA 侧 LVDS 实例，与 `pclk` 同域 |
 | 板级控制 | 32路低有效 die 复位输出和4位时钟控制输出；具体引脚映射由外层集成完成 |
+| 忙状态 | `send_busy_o`、`boot_busy_o`，`pclk` 域；供外层管理存储器访问权和调试 |
+
+通道数和 SPI 组数由所选寄存器配置决定，见下文“寄存器配置”。`tj_ctrl_top` 的 `N_CH`、`N_SPI_GRP` 默认取生成的
+`TJ_CSR_RECV_N`、`TJ_CSR_SPI_N`；显式设置时必须与寄存器配置一致，否则展开时报错。
 
 `pclk` 用于 CSR、SPI 和配置链，`maxi_clk` 用于 AXI、包收发和时间戳。
 `presetn`、`maxi_rstn` 均低有效，必须同源、同时断言。
@@ -53,11 +57,36 @@ SEND 的标志位为 LAST(bit0)、FENCE(bit1)、IRQ(bit2)，按记录中的逻�
 SEND 表起始地址要求64字节对齐。RECV 按通道写入环形缓冲，Host 读取后更新 RPTR 归还空间。
 跨域计数和指针通过快照读回，可能滞后于数据通路；具体操作顺序见寄存器及模块说明。
 
+## 寄存器配置
+
+寄存器只在 `csr/tj_ctrl_csr.yaml` 中定义。文件的 `profiles` 一节声明默认配置以外的配置，
+生成器按配置名调整实现数量、字段位宽和版本号。
+
+| 配置 | RECV 通道 | SPI 组 × die | `SPI.CMD.DIE` | `GLB.VERSION` |
+|---|---:|---:|---|---|
+| default | 3 | 8 × 4 | [5:4] | 0x00000100 |
+| agilex4 | 12 | 4 × 8 | [6:4] | 0x00000200 |
+
+两种配置的寄存器地址布局相同。agilex4 只实现 SPI 组0～3，访问组4～7的地址返回 APB 错误；组内 die 编号0～7，
+片选序号为组号×8+DIE。软件须先读 `GLB.VERSION`，再按对应布局填写 DIE。
+
+`regen.sh` 只生成默认配置，生成物随源码提交。其他配置生成到被忽略的 `controller/build/` 下，不入库：
+
+```sh
+python3 controller/csr/gen_csr.py controller/csr/tj_ctrl_csr.yaml --profile agilex4 \
+  --out-rtl controller/build/agilex4/rtl --out-doc controller/build/agilex4/doc \
+  --out-tb controller/build/agilex4/tb
+```
+
+使用 agilex4 的工程，用同一次生成的 `tj_ctrl_csr_pkg.sv`、`tj_ctrl_csr.sv` 替换 `flist/tj_ctrl.f` 中的默认文件，
+其余文件和顺序不变；不能同时编译两套同名模块。
+
 ## CDC 时序约束
 
 目标 FPGA 为 Intel Agilex 7 I-Series 的 `AGIB041R29D1E2VB` 或 `AGIB041R29D1E2VC`，两种型号共用 Quartus Prime Pro 的 TimeQuest 约束。
 本次 Agilex 7 时序验证采用 `AGIB041R29D1E2VB` 的布线网表。Synopsys 和 Vivado 文件供参考。
 先定义 `pclk` 和 `maxi_clk`，再从 `scripts/` 加载所选工具对应的六组约束。
+Quartus 公共约束默认按名称 `pclk` 查找时钟；板级时钟名不同时，加载前把 `TJ_CTRL_PCLK` 设为实际的 APB 时钟名。
 
 | 工具 | 公共约束 | 五组配套文件的命名 |
 |---|---|---|
@@ -131,7 +160,7 @@ REGRESS_TESTS="recv boot" RECV_CASES=P10,P11 BOOT_CASES=P11 \
 | lnk | LNK_CASES | T1～T4 |
 | cfgchain | CFGCHAIN_CASES | P1～P4 |
 | jitter | 同SEND/RECV/BOOT场景变量 | JITTER_TESTS选择send、recv、boot，默认三者 |
-| gen、csr、top、apb_smoke、static、image、init | — | 按整个阶段选择 |
+| gen、csr、top、apb_smoke、static、image、init、profiles | — | 按整个阶段选择 |
 
 只设置SEND_CASES等场景变量不会关闭其他阶段；只测SEND时还需设置REGRESS_TESTS=send。
 REGRESS_TESTS支持空格或逗号分隔；场景变量使用逗号分隔，例如P1,P13。未设置某模块的
@@ -144,7 +173,7 @@ REGRESS_TESTS支持空格或逗号分隔；场景变量使用逗号分隔，例�
 旁路P14～P17分别为慢写停止、读欠载停止预取、APB错误终止、暂停SCLK访问慢目标。
 
 该入口运行生成物一致性、CSR、SPI、顶层展开、APB冒烟、lint和CDC结构检查、镜像工具与格式、
-初始化重放、LVDS链路、SEND、RECV、BOOT和旁路SPI检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 和旁路种子，
+初始化重放、LVDS链路、SEND、RECV、BOOT、旁路SPI和两种寄存器配置检查。`SEEDS`、`EXTRA_SEEDS` 控制 SPI 和旁路种子，
 `DSEEDS` 控制 SEND、RECV、BOOT 种子，默认 `default 31 166 7`；BOOT 每档时钟都运行这些种子。
 SEND、RECV 另用交付时钟（`pclk` 250 MHz、`maxi_clk` 50 MHz）和默认种子运行一次；SEND 跳过镜像重放。
 RECV、BOOT 的轮询次数和全局超时预算随 `pclk/maxi_clk` 比例缩放。
@@ -155,6 +184,8 @@ SPI、初始化重放和 BOOT 仿真启用 `TJ_ASSERT_ON`，检查 SPI 引擎接
 `SKIP_APB_SMOKE`、`SKIP_SG`、`SKIP_LNK` 可跳过对应项目。`SKIP_SG`同时跳过lint与CDC。
 CDC使用`controller/scripts/tj_ctrl.sgdc`，检查时钟为pclk=250MHz、maxi_clk=50MHz，不加载豁免文件。
 旁路 SPI 使用独立顶层 `tj_bypass_static_top` 显式开启功能，再运行 lint 和 CDC；约束为 `scripts/tj_bypass.sgdc`，pclk=250MHz、SCLK=25MHz，不加载豁免文件。
+配置检查（profiles）分别生成 default 和 agilex4 的寄存器，用同一套生产 RTL 运行 CSR 自测、32个 die 的门铃/SPIWIN/BOOT 访问和 APB 冒烟，
+并确认 SPI 组数与寄存器配置不一致时展开报错；默认使用 VCS，`PROFILE_SIMULATOR=questa` 时改用 Questa。
 工具或用例不可用时，部分项目也会跳过，运行结果须结合日志中的跳过项查看。
 
 镜像阶段先运行 Python CLI 测试，检查地址段、比较器和各核 CONFIG，再用 SV 核对记录及内存数据。
@@ -177,7 +208,7 @@ SEND补充连续错误、IRQ和轮询相位检查。
 
 | 测试 | 说明 |
 |---|---|
-| SPI、门铃、仲裁和超时恢复 | [SPI 测试](tb/spi/README.md) |
+| SPI、门铃、仲裁、超时恢复和两种寄存器配置 | [SPI 测试](tb/spi/README.md) |
 | LVDS 链路及配置链 | [链路测试](tb/lnk/README.md) |
 | SEND、计数、事件和中止 | [SEND 测试](tb/send/README.md) |
 | RECV、环指针、重映射和中止 | [RECV 测试](tb/recv/README.md) |
