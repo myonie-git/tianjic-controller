@@ -16,8 +16,9 @@
 | `rtl/boot/` | BOOT子系统封装、装载控制及64字节取数前端 |
 | `rtl/dma/` | SEND 取数与分发、RECV 环形写入、AXI 后端及指针快照同步 |
 | `rtl/lnk/` | FPGA 侧配置链主机 |
+| `rtl/lvds/` | controller 自有的 LVDS 协议、收发、配置链与 CSR 副本 |
 | `rtl/common/` | 电平、脉冲、事件及整字快照同步单元 |
-| `flist/` | 生产 RTL 清单 `tj_ctrl.f`，仿真清单 `tj_ctrl_cosim.f` |
+| `flist/` | Controller 清单 `tj_ctrl.f`、独立 LVDS 清单 `tj_lvds.f`、仿真清单 `tj_ctrl_cosim.f` |
 | `scripts/` | 回归、芯片仿真入口和跨域时序约束 |
 | `tb/` | 模块测试、镜像检查、初始化重放、芯片联合仿真，以及仿真用的直连和芯片 LVDS 适配模块 |
 | `sw/` | 镜像导出、结果比较和格式自检工具 |
@@ -28,6 +29,30 @@
 BOOT由`tj_boot_subsys`连接控制引擎和取数前端；共享读仲裁位于顶层，SPI仲裁位于SPI子系统。
 `tj_bypass_spi` 由外层系统例化。`ENABLE_BYPASS_SPI` 默认 `0`，APB 直接透传并释放 MISO。
 实例参数设为 `.ENABLE_BYPASS_SPI(1'b1)` 时启用外部 SPI，并与上游 APB 请求仲裁后送入 `tj_ctrl_top`。
+
+## LVDS源码与集成
+
+`rtl/lvds/` 从 `main@1ad08072` 的 `soc/design/rtl/lvds_subsys/` 复制；
+`rtl/lvds/core_cfg/` 从同版 `soc/design/rtl/common/core_cfg/` 复制三个 RTL 文件。
+原 `soc/design/`、`design/` 和 `run_ca_demo/` 保持不变，芯片工程继续使用原实现。
+controller 与 FPGA 工程使用 controller 副本；不要同时编译两套同名 LVDS 模块。
+
+`flist/tj_lvds.f` 独立于 `tj_ctrl.f`，由集成方按需加入，现有 `tj_ctrl_top` 仍以包端口和配置链连接 LVDS。
+本清单列出协议/配置逻辑及原生 PAD/CRU 接口。macro 单元、PAD cell、ECC 实现由目标平台提供；
+Intel PLL、IP 配置和平台宏实现保留在独立 FPGA 工程，不随 controller 入库。
+Agilex 构建从清单中替换 `common/lvds_pads.v`、`lvds_rx/lvds_rx_cru.sv`、
+`lvds_tx/lvds_tx_cru.sv` 为 FPGA 工程的对应版本，每个模块只编译一份。
+板级顶层、JTAG/APB 和演示 RAM 也由 FPGA 工程管理。
+
+controller 副本保留已有 FPGA 适配：`INTEL_FPGA`/`FPGA` 下的 RX 输入流水线，
+以及 `INTEL_FPGA` 下的硬时钟缓冲参数。`lvds_subsys.USE_EXTERNAL_TLAST` 默认0，
+延续每个96位记录独立成帧的行为；设为1时由新增的 `s0_axis_tlast`～`s3_axis_tlast` 决定帧尾，
+四路 TLAST 必须与对应数据/valid 同步并在反压时保持。Agilex 工程显式启用该参数。
+宏实现和板级时钟约束须与所选平台匹配。
+
+模块链路测试通过 `tb/lnk/lvds_files.f` 编译 controller 副本；该清单中的
+`YAWING_DESIGN` 只提供芯片仿真技术模型，`DW_SIM_DIR` 提供外部 ECC 模型。
+完整芯片联合仿真继续使用原 SOC LVDS，实现选择由各自清单决定。
 
 ## 主要接口约定
 

@@ -1,0 +1,51 @@
+// Controller-owned LVDS; copied from soc/design, whose sources stay unchanged.
+// Supply platform macro, pad-cell and DW_ecc implementations separately.
+// FPGA builds replace lvds_pads, lvds_rx_cru and lvds_tx_cru with their platform versions.
+// Do not compile this list together with the original SOC LVDS definitions.
+${TJ_CTRL_HOME}/rtl/lvds/core_cfg/apb2cfg.sv
+${TJ_CTRL_HOME}/rtl/lvds/core_cfg/core_cfg_pp.sv
+${TJ_CTRL_HOME}/rtl/lvds/core_cfg/core_cfg_wrap.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/arbiter.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/axis_arb.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/axis_arb_mux.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/axis_arb_rr.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/axis_async_fifo.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/axis_demux.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/axis_fifo.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/axis_mimo_rx.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/axis_mimo_tx.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/axis_mux.sv
+${TJ_CTRL_HOME}/rtl/lvds/axis_switch/priority_encoder.sv
+${TJ_CTRL_HOME}/rtl/lvds/common/crc_64bits_gen.v
+${TJ_CTRL_HOME}/rtl/lvds/common/cross_event_gen.sv
+${TJ_CTRL_HOME}/rtl/lvds/common/generic_afifo_ctrl.sv
+${TJ_CTRL_HOME}/rtl/lvds/common/lvds_crc_gen.sv
+${TJ_CTRL_HOME}/rtl/lvds/common/lvds_generic_afifo.sv
+${TJ_CTRL_HOME}/rtl/lvds/common/lvds_generic_afifo_regfile.sv
+${TJ_CTRL_HOME}/rtl/lvds/common/lvds_if_pkg.sv
+${TJ_CTRL_HOME}/rtl/lvds/common/lvds_pads.v
+${TJ_CTRL_HOME}/rtl/lvds/common/prbs8_gen.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_rx/lvds_dec_8b10b.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_rx/lvds_rx_axis_if.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_rx/lvds_rx_bit_calib.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_rx/lvds_rx_bit_calib_sl.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_rx/lvds_rx_bit_ctrl.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_rx/lvds_rx_cru.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_rx/lvds_rx_ctrl.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_rx/lvds_rx_pad_wrap.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_rx/lvds_rx_word_ctrl.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_rx/lvds_rx_wrap.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_tx/lvds_enc_8b10b.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_tx/lvds_sync_fifo.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_tx/lvds_tx_axis_if.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_tx/lvds_tx_bit_ctrl.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_tx/lvds_tx_calib.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_tx/lvds_tx_cru.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_tx/lvds_tx_ctrl.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_tx/lvds_tx_pad_wrap.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_tx/lvds_tx_word_ctrl.sv
+${TJ_CTRL_HOME}/rtl/lvds/lvds_tx/lvds_tx_wrap.sv
+${TJ_CTRL_HOME}/rtl/lvds/top/lvds_core_cfg_wrap.sv
+${TJ_CTRL_HOME}/rtl/lvds/top/lvds_subsys.sv
+${TJ_CTRL_HOME}/rtl/lvds/top/lvds_subsys_csr.sv
+${TJ_CTRL_HOME}/rtl/lvds/top/lvds_tx_rx_wrap.sv
