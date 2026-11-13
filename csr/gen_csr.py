@@ -373,6 +373,10 @@ def load_model(path, profile="default"):
     meta = doc['meta']
     meta['profile'] = profile
     meta['profiles'] = profiles
+    meta['notes'] = doc.get('notes') or []
+    for n in meta['notes']:
+        if not isinstance(n, dict) or not isinstance(n.get('text'), str):
+            raise ValueError('notes 每项须有单行 text: %r' % (n,))
     blocks = [Block(b) for b in doc['blocks']]
     blocks.sort(key=lambda b: b.base)
     for a, b in zip(blocks, blocks[1:]):
@@ -748,22 +752,12 @@ def emit_doc(meta, blocks):
                     bits, f.name or '—', kind, rst, desc))
                 first = False
         o.append('')
-    o.extend([
-        '## LVDS配置与预留功能', '',
-        'Host通过CC块(0x3800)访问本地LVDS CSR；CC.WDATA中的地址是LVDS字节偏移，',
-        '不是Host APB绝对地址，也不是SPI访问的芯片AHB地址。目标寄存器定义见',
-        '`controller/rtl/lvds/top/lvds_subsys_csr.sv`中的`*_OFFSET_ADDR`及对应读写逻辑。',
-        'CC配置时钟必须与目标实例配置时钟同域，每个实例的CORE_ID须唯一。', '',
-        '写入：等待CC空闲，以KIND=0发送地址并敲GO，等BUSY清零；',
-        '再以KIND=1发送数据并敲GO，等BUSY清零。两拍须使用同一INST且禁止插入其他链操作。',
-        '写操作没有目标返回确认；需要确认时通过读回验证。', '',
-        '读取：等待CC空闲，写1清除旧DVLD；以KIND=2或3发送地址并敲GO。',
-        '确认请求已处理后，等待新的DVLD再读取RDATA；BUSY清零而DVLD未置位可能是超时，',
-        '不得把旧RDATA当作本次结果。软件轮询须设超时。', '',
-        'LNK.FC_TMO、CNT_SEL、CNT_VAL、STA以及PRBS、TRACE仍为预留；',
-        '迁入LVDS源码不会自动增加这些Host寄存器。LVDS内部调试/校准CSR通过CC访问。',
-        '板级JTAG/debug_apb和演示RAM不属于controller寄存器ABI，旧0x9000诊断窗口不在本映射中。', '',
-    ])
+    for n in meta.get('notes', []):
+        if n.get('title'):
+            o.append('## %s' % n['title'])
+            o.append('')
+        o.append(n['text'])
+        o.append('')
     return '\n'.join(o) + '\n'
 
 
