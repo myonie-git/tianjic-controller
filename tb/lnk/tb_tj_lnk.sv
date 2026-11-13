@@ -1,7 +1,9 @@
 // File        : tb_tj_lnk.sv
 // Module      : tb_tj_lnk
 // Description : Verify configuration access and bidirectional LVDS packet traffic.
-//               Uses two chip LVDS instances, four logical ports and random backpressure.
+//               Default mode links two controller LVDS copies over four logical ports with
+//               random backpressure. EXTERNAL_TLAST_TEST pairs a copy using external TLAST
+//               with the original SOC LVDS.
 // Compile chip RTL with FOR_SIM_ONLY and a 1 ps / 1 fs timescale.
 
 module tb_tj_lnk #(parameter bit EXTERNAL_TLAST_TEST = 0);
@@ -433,6 +435,7 @@ module tb_tj_lnk #(parameter bit EXTERNAL_TLAST_TEST = 0);
       if (EXTERNAL_TLAST_TEST) $display("TLAST TB PASS (%0d checks)", checks);
       else $display("LNK TB PASS (%0d checks)", checks);
     end
+    else if (EXTERNAL_TLAST_TEST) $display("TLAST TB FAIL (%0d/%0d)", errs, checks);
     else           $display("LNK TB FAIL (%0d/%0d)", errs, checks);
     $finish;
   end
