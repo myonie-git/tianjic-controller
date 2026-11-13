@@ -6,6 +6,9 @@
 # Edit this source and regenerate the outputs.
 #
 # Format: two-space indentation, block mappings, and single-line desc strings.
+# desc may use ${name} placeholders, filled by gen_csr.py from the selected profile:
+#   groups, groups_max, dies, die_max (SPI); channels, channel_max (RECV);
+#   recv_irq_hi (last RECV bit in IRQ.RAW); lvds_inst_max (last default LVDS instance).
 # Addresses are byte offsets; registers are 32 bits wide with a 4-byte stride.
 # RW: read/write; RO: constant or hardware input.
 # W1C: hardware set, write 1 to clear; W1S: write 1 to set target.
@@ -70,7 +73,7 @@ blocks:
           - name: SPI_BUSY
             bits: "7:0"
             kind: RO
-            desc: "各SPI引擎实际占用状态，含SPIWIN访问；门铃事务状态见各组SPI.STA.BUSY。"
+            desc: "各SPI引擎实际占用状态，含SPIWIN访问；门铃事务状态见各组SPI.STA.BUSY。当前有效[${groups_max}:0]，高位补0。"
 
           - name: BOOT_BUSY
             bits: 8
@@ -96,7 +99,7 @@ blocks:
       - name: RAW
         offset: 0x00
         kind: W1C
-        desc: "原始事件,硬件置位、写 1 清零。[7:0]=SPI 完成 [8]=BOOT 完成 [9]=SEND 完成/记录 irq 标志(同表多个 irq 标志合并为首次一报,进度以 SEND.SENT 追踪) [10]=CC 完成 [11]=TRACE 回绕 [23:12]=RECV 通道事件 [24]=SPI 超时 [25]=ECC 不可纠 [26]=链路停滞 [27]=RECV 溢出 [28]=AXI 响应错 [29]=BOOT 错 [31:30]=保留。位11、25、26未接硬件事件，可通过IRQ.TST置位。"
+        desc: "原始事件,硬件置位、写 1 清零。[7:0]=SPI 完成 [8]=BOOT 完成 [9]=SEND 完成/记录 irq 标志(同表多个 irq 标志合并为首次一报,进度以 SEND.SENT 追踪) [10]=CC 完成 [11]=TRACE 回绕 [23:12]=RECV 通道事件 [24]=SPI 超时 [25]=ECC 不可纠 [26]=链路停滞 [27]=RECV 溢出 [28]=AXI 响应错 [29]=BOOT 错 [31:30]=保留。位11、25、26未接硬件事件，可通过IRQ.TST置位。当前SPI完成事件源为位0～${groups_max}，RECV事件源为位12～${recv_irq_hi}；未实例化通道无硬件事件源，IRQ.TST仍可测试注入。"
 
       - name: EN
         offset: 0x04
@@ -169,7 +172,7 @@ blocks:
     size: 0x400
     count: 8
     stride: 0x80
-    desc: "SPI组控制与状态；逻辑接口为组内4个die共用SCLK/MOSI、独立CS/MISO。CLKDIV/TMO与SPIWIN、BOOT共用。"
+    desc: "SPI组控制与状态；当前${groups}组，每组${dies}个die共用SCLK/MOSI、独立CS/MISO。CLKDIV/TMO与SPIWIN、BOOT共用。"
     regs:
       - name: CMD
         offset: 0x00
@@ -183,7 +186,7 @@ blocks:
           - name: DIE
             bits: "5:4"
             kind: RW
-            desc: "组内die编号0～3，对应逻辑片选cs_n[组号*4+DIE]。"
+            desc: "组内die编号0～${die_max}，对应片选cs_n[组号*${dies}+DIE]。"
 
       - name: ADDR
         offset: 0x04
@@ -383,7 +386,7 @@ blocks:
     count: 12
     impl_count: 3
     stride: 0x40
-    desc: "上行 RECV 通道(每 LVDS 逻辑 ch 一套环形缓冲;v1 例化 3 通道,4~12 预留)"
+    desc: "每个LVDS逻辑通道一套环形缓冲；当前实现通道0～${channel_max}，其余预留实例访问返回pslverr。"
     regs:
       - name: RING_LO
         offset: 0x00
@@ -479,7 +482,7 @@ blocks:
         offset: 0x00
         kind: RW
         bits: "11:0"
-        desc: "逻辑通道使能位图(v1 有效 [2:0])"
+        desc: "逻辑通道使能位图；当前有效[${channel_max}:0]。"
 
       - name: REMAP0
         offset: 0x04
@@ -649,7 +652,7 @@ blocks:
           - name: DIE
             bits: "4:0"
             kind: RW
-            desc: "目标 die 全局编号 0~31(组=DIE 除 4,片选=cs_n[DIE])"
+            desc: "目标die全局编号0～31；组=DIE除${dies}，组内编号=DIE模${dies}，片选=cs_n[DIE]。"
 
       - name: OFFS
         offset: 0x08
@@ -702,7 +705,7 @@ blocks:
           - name: INST
             bits: "5:4"
             kind: RW
-            desc: "本地lvds_subsys实例ID，与目标CORE_ID匹配；v1仅用0，不是芯片die编号。"
+            desc: "本地LVDS实例ID，与目标CORE_ID匹配，不是芯片die编号。当前默认拓扑实例0～${lvds_inst_max}；集成时须保证CORE_ID唯一。"
 
       - name: WDATA
         offset: 0x04

@@ -304,6 +304,21 @@ class Block(object):
         return [r for r in self.regs if r.impl == 'v1']
 
 
+_PLACEHOLDER = re.compile(r'\$\{(\w+)\}')
+
+
+def _expand_desc(d, values, where):
+    """Fill ${name} placeholders in d['desc'] from the selected profile."""
+    def sub(m):
+        if m.group(1) not in values:
+            raise ValueError('%s: 未知占位符 ${%s}' % (where, m.group(1)))
+        return str(values[m.group(1)])
+    if isinstance(d.get('desc'), str):
+        d['desc'] = _PLACEHOLDER.sub(sub, d['desc'])
+        if '${' in d['desc']:
+            raise ValueError('%s: 占位符格式错' % where)
+
+
 def load_model(path, profile="default"):
     global SRC_MD5
     with io.open(path, encoding='utf-8') as f:
@@ -344,26 +359,17 @@ def load_model(path, profile="default"):
         version['const'] = cfg['version_register']
         # Distinguish generated variants of the same source file.
         SRC_MD5 = hashlib.md5((text + '\nprofile=' + profile).encode('utf-8')).hexdigest()[:12]
-    # Descriptions must follow the selected model, just like the generated RTL.
-    # Keep address/field definitions unchanged; these are documentation changes.
+    # Profile-dependent desc text is written as ${name} in the YAML; fill it here.
     groups, dies, channels = cfg['spi_groups'], cfg['spi_dies_per_group'], cfg['recv_channels']
-    def reg(block, name):
-        return next(r for r in by_name[block]['regs'] if r['name'] == name)
-    def field(block, name, member):
-        return next(f for f in reg(block, name)['fields'] if f['name'] == member)
-    by_name['SPI']['desc'] = ('SPI组控制与状态；当前%d组，每组%d个die共用SCLK/MOSI、独立CS/MISO。'
-                              'CLKDIV/TMO与SPIWIN、BOOT共用。') % (groups, dies)
-    field('SPI', 'CMD', 'DIE')['desc'] = '组内die编号0～%d，对应片选cs_n[组号*%d+DIE]。' % (dies - 1, dies)
-    by_name['RECV']['desc'] = ('每个LVDS逻辑通道一套环形缓冲；当前实现通道0～%d，'
-                               '其余预留实例访问返回pslverr。') % (channels - 1)
-    reg('LNK', 'EN')['desc'] = '逻辑通道使能位图；当前有效[%d:0]。' % (channels - 1)
-    field('SPIWIN', 'PAGE', 'DIE')['desc'] = ('目标die全局编号0～31；组=DIE除%d，'
-                                             '组内编号=DIE模%d，片选=cs_n[DIE]。') % (dies, dies)
-    field('CC', 'CMD', 'INST')['desc'] = ('本地LVDS实例ID，与目标CORE_ID匹配，不是芯片die编号。'
-                                         '当前默认拓扑实例0～%d；集成时须保证CORE_ID唯一。') % ((channels + 2) // 3 - 1)
-    field('GLB', 'STA', 'SPI_BUSY')['desc'] += ' 当前有效[%d:0]，高位补0。' % (groups - 1)
-    reg('IRQ', 'RAW')['desc'] += (' 当前SPI完成事件源为位0～%d，RECV事件源为位12～%d；'
-                                 '未实例化通道无硬件事件源，IRQ.TST仍可测试注入。') % (groups - 1, 11 + channels)
+    values = dict(groups=groups, groups_max=groups - 1, dies=dies, die_max=dies - 1,
+                  channels=channels, channel_max=channels - 1, recv_irq_hi=11 + channels,
+                  lvds_inst_max=(channels + 2) // 3 - 1)
+    for b in doc['blocks']:
+        _expand_desc(b, values, b['name'])
+        for r in b['regs']:
+            _expand_desc(r, values, '%s.%s' % (b['name'], r['name']))
+            for f in r.get('fields', []):
+                _expand_desc(f, values, '%s.%s.%s' % (b['name'], r['name'], f['name']))
     meta = doc['meta']
     meta['profile'] = profile
     meta['profiles'] = profiles
