@@ -13,7 +13,7 @@
 # JSEEDS selects seeds for the three-clock-ratio CDC jitter runs.
 # SKIP_APB_SMOKE, SKIP_SG and SKIP_LNK skip the corresponding stages.
 # PROFILE_SIMULATOR selects vcs (default) or questa for the profiles stage.
-# LNK_SIMULATOR selects vcs (default) or questa for lnk/cfgchain.
+# LNK_SIMULATOR selects vcs (default) or questa for lnk/tlast/cfgchain.
 set -u
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -40,7 +40,7 @@ selected() {
 }
 for stage in $REGRESS_TESTS; do
   case "$stage" in
-    gen|csr|spi|top|apb_smoke|static|image|init|lnk|cfgchain|send|recv|boot|bypass|bypass_disabled|bypass_csr|jitter|profiles) ;;
+    gen|csr|spi|top|apb_smoke|static|image|init|lnk|tlast|cfgchain|send|recv|boot|bypass|bypass_disabled|bypass_csr|jitter|profiles) ;;
     *) printf 'Unknown REGRESS_TESTS stage: %s\n' "$stage" >&2; exit 2 ;;
   esac
 done
@@ -327,7 +327,7 @@ else
   say "SKIP init (not selected)"
 fi
 
-if selected lnk || selected cfgchain; then
+if selected lnk || selected tlast || selected cfgchain; then
   # LVDS link test.
   echo
   if [ "${SKIP_LNK:-0}" = "1" ]; then
@@ -335,18 +335,22 @@ if selected lnk || selected cfgchain; then
   elif [ ! -f "$TJ_CTRL_HOME/rtl/lvds/top/lvds_subsys.sv" ]; then
     bad "[9/14] Controller LVDS 源码缺失"
   else
-    say "[9/14] LVDS 链路验收 TB(链主机 + 两份controller LVDS副本对打,T1-T4)"
     lnk_tests=""
-    selected lnk && lnk_tests="$lnk_tests lnk"
+    if selected lnk; then
+      lnk_tests="$lnk_tests lnk tlast"
+    elif selected tlast; then
+      lnk_tests="$lnk_tests tlast"
+    fi
     selected cfgchain && lnk_tests="$lnk_tests cfgchain"
+    say "[9/14] LVDS/配置链验收 TB:$lnk_tests"
     if LNK_TESTS="$lnk_tests" sh "$TJ_CTRL_HOME/tb/lnk/run_lnk_tb.sh" "$WORK/lnk" > "$WORK/lnk_run.log" 2>&1; then
-      say "    $(grep -E '(LNK|CFGCHAIN) TB PASS' "$WORK/lnk_run.log")"
+      say "    $(grep -E '(LNK|TLAST|CFGCHAIN) TB PASS' "$WORK/lnk_run.log")"
     else
       bad "LVDS 链路 TB 未 PASS(见 $WORK/lnk_run.log)"
     fi
   fi
 else
-  say "SKIP lnk/cfgchain (not selected)"
+  say "SKIP lnk/tlast/cfgchain (not selected)"
 fi
 
 # Run each data-path seed using the same compiled simulator.

@@ -4,7 +4,7 @@
 //               Uses two chip LVDS instances, four logical ports and random backpressure.
 // Compile chip RTL with FOR_SIM_ONLY and a 1 ps / 1 fs timescale.
 
-module tb_tj_lnk;
+module tb_tj_lnk #(parameter bit EXTERNAL_TLAST_TEST = 0);
   `include "tj_case_select.svh"
   import tj_ctrl_pkg::*;
 
@@ -61,19 +61,38 @@ module tb_tj_lnk;
   wire [2:0]        ab_c_p, ab_c_n, ba_c_p, ba_c_n;
   wire [2:0][4:0]   ab_d_p, ab_d_n, ba_d_p, ba_d_n;
 
-  tj_lnk_plug_chip u_a (
-    .core_id(2'd0), .core_id_next(a_idn),
-    .apb_pclk(clk_a), .axis_brg_clk(clk_a), .lvds_tx_bclk(bclk_a), .rstn_raw(rstn),
-    .s_tvalid(a_sv), .s_tready(a_sr), .s_tdata(a_sd),
-    .m_tvalid(a_mv), .m_tready(a_mr), .m_tdata(a_md),
-    .cfg_din(ccm_din), .cfg_din_vld(ccm_din_vld),
-    .cfg_dout(a_dout), .cfg_dout_vld(a_dout_vld),
-    .cfg_din_next(a2b_din), .cfg_din_next_vld(a2b_vld),
-    .cfg_dout_next(b2a_dout), .cfg_dout_next_vld(b2a_vld),
-    .err_intr(a_err), .send_mode(a_sm),
-    .txc_p(ab_c_p), .txc_n(ab_c_n), .txd_p(ab_d_p), .txd_n(ab_d_n),
-    .rxc_p(ba_c_p), .rxc_n(ba_c_n), .rxd_p(ba_d_p), .rxd_n(ba_d_n)
-  );
+  logic [3:0] a_sl;
+  int unsigned a_checked_records, a_checked_groups;
+  generate if (EXTERNAL_TLAST_TEST) begin : g_tlast
+    tj_lnk_plug_tlast u_a (
+      .s_tlast(a_sl), .checked_records(a_checked_records), .checked_groups(a_checked_groups),
+      .core_id(2'd0), .core_id_next(a_idn),
+      .apb_pclk(clk_a), .axis_brg_clk(clk_a), .lvds_tx_bclk(bclk_a), .rstn_raw(rstn),
+      .s_tvalid(a_sv), .s_tready(a_sr), .s_tdata(a_sd),
+      .m_tvalid(a_mv), .m_tready(a_mr), .m_tdata(a_md),
+      .cfg_din(ccm_din), .cfg_din_vld(ccm_din_vld),
+      .cfg_dout(a_dout), .cfg_dout_vld(a_dout_vld),
+      .cfg_din_next(a2b_din), .cfg_din_next_vld(a2b_vld),
+      .cfg_dout_next(b2a_dout), .cfg_dout_next_vld(b2a_vld),
+      .err_intr(a_err), .send_mode(a_sm),
+      .txc_p(ab_c_p), .txc_n(ab_c_n), .txd_p(ab_d_p), .txd_n(ab_d_n),
+      .rxc_p(ba_c_p), .rxc_n(ba_c_n), .rxd_p(ba_d_p), .rxd_n(ba_d_n)
+    );
+  end else begin : g_legacy
+    tj_lnk_plug_chip u_a (
+      .core_id(2'd0), .core_id_next(a_idn),
+      .apb_pclk(clk_a), .axis_brg_clk(clk_a), .lvds_tx_bclk(bclk_a), .rstn_raw(rstn),
+      .s_tvalid(a_sv), .s_tready(a_sr), .s_tdata(a_sd),
+      .m_tvalid(a_mv), .m_tready(a_mr), .m_tdata(a_md),
+      .cfg_din(ccm_din), .cfg_din_vld(ccm_din_vld),
+      .cfg_dout(a_dout), .cfg_dout_vld(a_dout_vld),
+      .cfg_din_next(a2b_din), .cfg_din_next_vld(a2b_vld),
+      .cfg_dout_next(b2a_dout), .cfg_dout_next_vld(b2a_vld),
+      .err_intr(a_err), .send_mode(a_sm),
+      .txc_p(ab_c_p), .txc_n(ab_c_n), .txd_p(ab_d_p), .txd_n(ab_d_n),
+      .rxc_p(ba_c_p), .rxc_n(ba_c_n), .rxd_p(ba_d_p), .rxd_n(ba_d_n)
+    );
+  end endgenerate
 
   tj_lnk_plug_chip u_b (
     .core_id(a_idn), .core_id_next(b_idn),
@@ -145,13 +164,22 @@ module tb_tj_lnk;
   always @(posedge clk_a) for (int p = 0; p < 4; p++)
     if (a_mv[p] && a_mr[p]) rxq_a[p].push_back(a_md[p]);
 
+  bit hold_b = 0;
+  int unsigned tx_stalls = 0, rx_stalls = 0, contested_cycles = 0, gap_cycles = 0;
+  always @(posedge clk_a) if (rstn && EXTERNAL_TLAST_TEST) begin
+    if (|(a_sv & ~a_sr)) tx_stalls++;
+    if ($countones(a_sv) > 1) contested_cycles++;
+  end
+  always @(posedge clk_b) if (rstn && EXTERNAL_TLAST_TEST && |(b_mv & ~b_mr)) rx_stalls++;
+
   // Random backpressure in each receiver clock domain.
-  always @(posedge clk_b) for (int p = 0; p < 4; p++) b_mr[p] <= ($urandom_range(0,3) != 0);
+  always @(posedge clk_b) for (int p = 0; p < 4; p++) b_mr[p] <= !hold_b && ($urandom_range(0,3) != 0);
   always @(posedge clk_a) for (int p = 0; p < 4; p++) a_mr[p] <= ($urandom_range(0,3) != 0);
 
-  task automatic send_a(input int p, input logic [95:0] d);
+  task automatic send_a(input int p, input logic [95:0] d, input bit last = 1);
     @(posedge clk_a);
     a_sd[p] <= d;
+    a_sl[p] <= last;
     a_sv[p] <= 1'b1;
     @(posedge clk_a);
     while (!a_sr[p]) @(posedge clk_a);
@@ -247,14 +275,96 @@ module tb_tj_lnk;
     traffic_checked = 1;
   endtask
 
+
+  // 1/2/3 records and groups longer than a physical frame (4/7/17 records).
+  localparam int N_GROUPS = 6, N_TLAST_RECORDS = 34;
+  function automatic int group_size(input int g);
+    case (g)
+      0: return 1; 1: return 2; 2: return 3;
+      3: return 4; 4: return 7; default: return 17;
+    endcase
+  endfunction
+  function automatic logic [95:0] grouped_packet(input int p, g, n);
+    return {32'h544c4153, 8'(p), 8'(g), 16'(n), 26'h123456, 2'(p), 4'b0010};
+  endfunction
+  task automatic send_groups(input int p);
+    for (int g = 0; g < N_GROUPS; g++) begin
+      for (int n = 0; n < group_size(g); n++) begin
+        // Pause inside an unfinished group, including just before its TLAST.
+        if (n != 0 && (n == 1 || n == group_size(g)-1)) begin
+          repeat (5+p) @(posedge clk_a);
+          gap_cycles++;
+        end
+        send_a(p, grouped_packet(p,g,n), n == group_size(g)-1);
+      end
+    end
+  endtask
+  task automatic exercise_tlast;
+    int seen[4][N_GROUPS];
+    for (int p = 0; p < 4; p++)
+      for (int g = 0; g < N_GROUPS; g++) seen[p][g] = 0;
+    hold_b = 1;
+    // Four contenders share three physical links. Reverse traffic is legacy SOC TX.
+    fork
+      send_groups(0);
+      send_groups(1);
+      send_groups(2);
+      send_groups(3);
+      begin
+        repeat (2500) @(posedge clk_b);
+        hold_b = 0;
+      end
+      begin
+        for (int p = 0; p < 4; p++)
+          for (int n = 0; n < 4; n++) send_b(p, grouped_packet(p,0,n));
+      end
+    join
+    #20us;
+    for (int p = 0; p < 4; p++) begin
+      chk(rxq_b[p].size() == N_TLAST_RECORDS,
+          $sformatf("TLAST port %0d count %0d/%0d",p,rxq_b[p].size(),N_TLAST_RECORDS));
+      // Different groups may use different physical links. Within a group,
+      // require exact sequence and payload, not a sorted multiset.
+      for (int i = 0; i < rxq_b[p].size(); i++) begin
+        int g;
+        g = rxq_b[p][i][55:48];
+        chk(g < N_GROUPS, "Received group ID is valid");
+        if (g < N_GROUPS) begin
+          chk(rxq_b[p][i] === grouped_packet(p,g,seen[p][g]),
+              $sformatf("TLAST port %0d group %0d record %0d",p,g,seen[p][g]));
+          seen[p][g]++;
+        end
+      end
+      for (int g = 0; g < N_GROUPS; g++)
+        chk(seen[p][g] == group_size(g), $sformatf("TLAST group count p%0d g%0d",p,g));
+      chk(rxq_a[p].size() == 4, "Legacy SOC return traffic count");
+      for (int n = 0; n < 4; n++) begin
+        int match_count;
+        match_count = 0;
+        for (int i = 0; i < rxq_a[p].size(); i++) if (rxq_a[p][i] === grouped_packet(p,0,n)) match_count++;
+        chk(match_count == 1, "Legacy SOC return payload exactly once");
+      end
+    end
+    chk(a_checked_records == 4*N_TLAST_RECORDS, "All arbiter outputs checked, including TLAST");
+    chk(a_checked_groups == 4*N_GROUPS, "All AXIS groups closed on the expected TLAST");
+    chk(tx_stalls > 0 && rx_stalls > 0, "Both transmit and receive backpressure exercised");
+    chk(contested_cycles > 0 && gap_cycles > 0, "Concurrent contenders and in-group gaps exercised");
+    $display("TLAST COVERAGE records=%0d groups=%0d tx_stalls=%0d rx_stalls=%0d contention=%0d gaps=%0d",
+             a_checked_records,a_checked_groups,tx_stalls,rx_stalls,contested_cycles,gap_cycles);
+    traffic_checked = 1;
+  endtask
+
   initial begin
     tj_cases_init("T1,T2,T3,T4");
+    if (EXTERNAL_TLAST_TEST && tj_case_filter_active)
+      $fatal(1, "TLAST test requires all configuration, traffic and error checks");
     db_go = 0;
     kind = '0;
     inst = '0;
     wdata = '0;
     a_sv = '0;
     a_sd = '0;
+    a_sl = '1;
     b_sv = '0;
     b_sd = '0;
     #1us rstn = 1;
@@ -297,7 +407,8 @@ module tb_tj_lnk;
         $display("CASE SETUP T2 for T3");
         configure_links();
       end
-      exercise_links();
+      if (EXTERNAL_TLAST_TEST) exercise_tlast();
+      else exercise_links();
     end
 
     // T4: Check latched error events and both error-status registers.
@@ -308,7 +419,8 @@ module tb_tj_lnk;
       end
       if (!traffic_checked) begin
         $display("CASE SETUP T3 for T4");
-        exercise_links();
+        if (EXTERNAL_TLAST_TEST) exercise_tlast();
+        else exercise_links();
       end
       chk(!a_err_seen && !b_err_seen, "No error interrupt during packet traffic");
       cc_read(2'd0, 25'h204, rd32);
@@ -317,7 +429,10 @@ module tb_tj_lnk;
       chk(rd32 === 32'h0, $sformatf("B.ERR_ST must be zero: %h", rd32));
     end
 
-    if (checks > 0 && errs == 0) $display("LNK TB PASS (%0d checks)", checks);
+    if (checks > 0 && errs == 0) begin
+      if (EXTERNAL_TLAST_TEST) $display("TLAST TB PASS (%0d checks)", checks);
+      else $display("LNK TB PASS (%0d checks)", checks);
+    end
     else           $display("LNK TB FAIL (%0d/%0d)", errs, checks);
     $finish;
   end

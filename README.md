@@ -46,8 +46,18 @@ Agilex 构建从清单中替换 `common/lvds_pads.v`、`lvds_rx/lvds_rx_cru.sv`�
 
 controller 副本保留已有 FPGA 适配：`INTEL_FPGA`/`FPGA` 下的 RX 输入流水线，
 以及 `INTEL_FPGA` 下的硬时钟缓冲参数。`lvds_subsys.USE_EXTERNAL_TLAST` 默认0，
-延续每个96位记录独立成帧的行为；设为1时由新增的 `s0_axis_tlast`～`s3_axis_tlast` 决定帧尾，
-四路 TLAST 必须与对应数据/valid 同步并在反压时保持。Agilex 工程显式启用该参数。
+每个96位记录都结束一次 AXIS 仲裁分组；设为1时由 `s0_axis_tlast`～`s3_axis_tlast` 指定分组末条记录。
+分组内保持发送链路选择，末条记录握手后释放；TLAST 必须与数据/valid 同步，并在反压时保持。
+发送方必须最终提供 TLAST，否则可能长期占用仲裁资源。
+
+这里的 AXIS 分组不等于物理 LVDS 帧。`lvds_tx_axis_if` 不使用 TLAST，
+`lvds_tx_word_ctrl` 按 FIFO 数据可用性及流控，把1～3条记录打包为一个物理帧。
+原 SOC `lvds_rx_word_ctrl` 已有对应1/2/3记录的解包状态，逐条恢复96位记录；
+它不会保留发送端 AXIS 分组边界。长 AXIS 分组会跨越多个物理帧。
+Agilex 适配器虽然显式设置 `USE_EXTERNAL_TLAST=1`，当前板级模板仍将所有 TLAST 接为1，
+实际按每条记录结束 AXIS 分组；此前12通道板级回环不能证明多记录 AXIS 分组已验证。
+新增 `tlast` 链路档使用 controller 发送端和独立库中的原 SOC 接收端验证这一模式，
+运行方式和检查范围见 [链路测试](tb/lnk/README.md)。
 宏实现和板级时钟约束须与所选平台匹配。
 
 模块链路测试通过 `tb/lnk/lvds_files.f` 编译 controller 副本；该清单中的
@@ -182,7 +192,8 @@ REGRESS_TESTS="recv boot" RECV_CASES=P10,P11 BOOT_CASES=P11 \
 | bypass | BYPASS_CASES | P1～P17 |
 | bypass_disabled | — | 关闭旁路的完整测例 |
 | bypass_csr | BYPASS_CSR_CASES | C1～C7 |
-| lnk | LNK_CASES | T1～T4 |
+| lnk | LNK_CASES | T1～T4；同时运行完整 tlast 档 |
+| tlast | — | 外部TLAST与原SOC互通完整测试 |
 | cfgchain | CFGCHAIN_CASES | P1～P4 |
 | jitter | 同SEND/RECV/BOOT场景变量 | JITTER_TESTS选择send、recv、boot，默认三者 |
 | gen、csr、top、apb_smoke、static、image、init、profiles | — | 按整个阶段选择 |

@@ -15,12 +15,13 @@ def main():
     ap.add_argument('work', nargs='?', type=Path, default=CTRL / 'build/lnk_questa')
     ap.add_argument('seeds', nargs='*', type=int, default=[1, 31, 166])
     args = ap.parse_args()
-    selected = os.environ.get('LNK_TESTS', 'lnk cfgchain').split()
-    if not selected or set(selected) - {'lnk', 'cfgchain'}:
-        ap.error('LNK_TESTS must select lnk and/or cfgchain')
+    selected = os.environ.get('LNK_TESTS', 'lnk tlast cfgchain').split()
+    if not selected or set(selected) - {'lnk', 'tlast', 'cfgchain'}:
+        ap.error('LNK_TESTS must select lnk, tlast and/or cfgchain')
+    link = bool(set(selected) & {'lnk', 'tlast'})
     roots = dict(os.environ, TJ_CTRL_HOME=str(CTRL),
                  YAWING_DESIGN=os.environ.get('YAWING_DESIGN', str(CTRL.parent / 'soc/design')))
-    if 'lnk' in selected and 'DW_SIM_DIR' not in roots:
+    if link and 'DW_SIM_DIR' not in roots:
         ap.error('Set DW_SIM_DIR to the directory containing the licensed DW_ecc.v model')
     binary = os.environ.get('QUESTA')
     if not binary:
@@ -35,7 +36,7 @@ def main():
     def run(tool, options, label, marker=None):
         command = [str(Path(binary) / (tool + suffix))] + [str(v) for v in options]
         result = subprocess.run(command, cwd=str(work), stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, encoding='utf-8', errors='replace', timeout=300)
+                                stderr=subprocess.STDOUT, encoding='utf-8', errors='replace', timeout=600)
         (work / (label + '.log')).write_text(result.stdout, encoding='utf-8')
         bad = re.search(r'\*\* (?:Error|Fatal):|\b(?:FAIL|TIMEOUT)\b', result.stdout)
         if result.returncode or bad or (marker and not re.search(marker, result.stdout)):
@@ -65,7 +66,7 @@ def main():
                 sources.append(source)
         return sources
 
-    if 'lnk' in selected:
+    if link:
         sources = filelist(CTRL / 'tb/lnk/lvds_files.f')
     else:
         sources = [CTRL / 'rtl/lvds/core_cfg/core_cfg_pp.sv',
@@ -73,8 +74,9 @@ def main():
     sources += [CTRL / name for name in ('rtl/pkg/tj_ctrl_pkg.sv', 'rtl/pkg/tj_ctrl_if.sv',
                 'rtl/csr/tj_ctrl_csr_pkg.sv', 'rtl/csr/tj_ctrl_csr.sv',
                 'rtl/lnk/tj_cfgchain_master.sv')]
-    if 'lnk' in selected:
-        sources += [CTRL / 'tb/lnk/tj_lnk_plugs.sv', CTRL / 'tb/lnk/tb_tj_lnk.sv']
+    if link:
+        sources += [CTRL / 'tb/lnk/tj_lnk_plugs.sv', CTRL / 'tb/lnk/tj_lnk_plug_tlast.sv',
+                    CTRL / 'tb/lnk/tb_tj_lnk.sv']
     if 'cfgchain' in selected:
         sources.append(CTRL / 'tb/lnk/tb_tj_cfgchain.sv')
     run('vmap', ['-c'], 'vmap')
@@ -82,6 +84,14 @@ def main():
         run('vlib', ['work'], 'vlib')
     run('vlog', ['-sv', '-timescale=1ps/1fs', '+define+FOR_SIM_ONLY', '+define+RTL',
                  '+incdir+' + str(CTRL / 'tb/common')] + sources, 'compile')
+    if 'tlast' in selected:
+        if not (work / 'tj_soc_lvds').exists():
+            run('vlib', ['tj_soc_lvds'], 'soc_vlib')
+        run('vmap', ['tj_soc_lvds', work / 'tj_soc_lvds'], 'soc_vmap')
+        run('vlog', ['-work', 'tj_soc_lvds', '-sv', '-timescale=1ps/1fs',
+                     '+define+FOR_SIM_ONLY', '+define+RTL'] +
+            filelist(CTRL / 'tb/lnk/lvds_soc_files.f'), 'soc_compile')
+        run('vlog', ['-sv', CTRL / 'tb/lnk/tj_lnk_tlast_cfg.sv'], 'tlast_config')
     tests = []
     if 'lnk' in selected:
         cases = ['+TJ_CASES=' + os.environ['LNK_CASES']] if os.environ.get('LNK_CASES') else []
@@ -90,6 +100,14 @@ def main():
                 tests.append(('tb_tj_lnk', cases + ['-sv_seed', str(seed)] +
                               (['+GRP210F'] if mode == '210f' else []),
                               'lnk_%s_%d' % (mode, seed), r'LNK TB PASS \([1-9][0-9]* checks\)'))
+    if 'tlast' in selected:
+        # Always run all scenarios: a selected legacy case must not silently
+        # remove the TLAST traffic/coverage checks.
+        for mode in ('211f', '210f'):
+            for seed in args.seeds:
+                tests.append(('tj_lnk_tlast_cfg', ['-sv_seed', str(seed)] +
+                              (['+GRP210F'] if mode == '210f' else []),
+                              'tlast_%s_%d' % (mode, seed), r'TLAST TB PASS \([1-9][0-9]* checks\)'))
     if 'cfgchain' in selected:
         cases = ['+TJ_CASES=' + os.environ['CFGCHAIN_CASES']] if os.environ.get('CFGCHAIN_CASES') else []
         for hp in ('5.0', '2.0'):
@@ -98,7 +116,7 @@ def main():
     for top, extra, name, marker in tests:
         # Starter Edition reports its recommended instance capacity as a
         # suppressible performance diagnostic; functional errors remain fatal.
-        run('vsim', ['-c', '-lic_noqueue', '-suppress', '14408', 'work.' + top] + extra + ['-do',
+        run('vsim', ['-c', '-lic_noqueue', '-suppress', '14408,16154', 'work.' + top] + extra + ['-do',
             'onerror {quit -code 1}; onbreak {quit -code 1}; run -all; quit -code 0'], name, marker)
 
 

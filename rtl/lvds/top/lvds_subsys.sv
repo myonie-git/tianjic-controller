@@ -1,6 +1,6 @@
 
 module lvds_subsys #(
-    // Default preserves the original one-record-per-frame chip interface.
+    // Default ends each AXIS arbitration group after one record.
     parameter bit USE_EXTERNAL_TLAST = 1'b0
 )(
     input       [1:0]                               CORE_ID,       //core_id in X/Y direction from upstream core_unit
@@ -156,8 +156,7 @@ logic                                           m3_axis_tlast;
 logic                                           m2_axis_tlast;
 logic                                           m1_axis_tlast;
 logic                                           m0_axis_tlast;
-// s*_axis_tlast are now input ports (see the port list) rather than dangling
-// internal wires, so a frame can span several 96-bit beats.
+// External AXIS group boundaries; TX word control handles physical framing.
 logic   [4*96-1:0]                              s_axis_tdata;
 logic   [3:0]                                   s_axis_tlast;
 logic   [3:0]                                   s_axis_tvalid;
@@ -597,7 +596,7 @@ assign lvds1_rx_err_ack                    = lvds1_rx_err_syn;
 assign lvds2_rx_err_ack                    = lvds2_rx_err_syn;
 assign lvds3_rx_err_ack                    = lvds3_rx_err_syn;
 
-// Select explicit multi-beat framing or the original one-record-per-frame mode.
+// Select external AXIS group boundaries or end arbitration after each record.
 assign s_axis_tlast = USE_EXTERNAL_TLAST
                    ? {s3_axis_tlast,s2_axis_tlast,s1_axis_tlast,s0_axis_tlast}
                    : {s3_axis_tvalid,s2_axis_tvalid,s1_axis_tvalid,s0_axis_tvalid};
